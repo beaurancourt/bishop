@@ -5,17 +5,21 @@ import {
   Events,
   GatewayIntentBits,
   GuildScheduledEvent,
+  GuildScheduledEventStatus,
+  type Message,
   type SendableChannels,
   TimestampStyles,
   time,
 } from "discord.js";
 import {
   buildIcs,
+  type CalendarEvent,
   googleCalendarUrl,
   icsFilename,
   outlookCalendarUrl,
 } from "./calendar.js";
 import { toCalendarEvent } from "./event.js";
+import { forgetMessage, getMessage, rememberMessage } from "./store.js";
 
 const token = process.env.DISCORD_TOKEN;
 if (!token) {
@@ -54,6 +58,69 @@ async function resolveAnnounceChannel(
   return fallback?.isSendable() ? fallback : null;
 }
 
+/** Fresh .ics attachment for the current state of an event. */
+function icsAttachment(calEvent: CalendarEvent): AttachmentBuilder {
+  return new AttachmentBuilder(Buffer.from(buildIcs(calEvent), "utf8"), {
+    name: icsFilename(calEvent),
+    description: `Calendar file for ${calEvent.title}`,
+  });
+}
+
+/** Message body for an upcoming/active event, with calendar links. */
+function renderActiveEvent(calEvent: CalendarEvent): string {
+  const lines = [
+    `📅 **${calEvent.title}** is on the calendar.`,
+    `🕒 ${time(calEvent.start, TimestampStyles.LongDateTime)} (${time(calEvent.start, TimestampStyles.RelativeTime)})`,
+  ];
+  if (calEvent.location) lines.push(`📍 ${calEvent.location}`);
+  lines.push(
+    "",
+    "Add it to your calendar:",
+    `• [Google Calendar](${googleCalendarUrl(calEvent)})`,
+    `• [Outlook](${outlookCalendarUrl(calEvent)})`,
+    "• Apple / other: download the attached `.ics` file",
+  );
+  return lines.join("\n");
+}
+
+/** Message body once an event is cancelled/deleted; links are removed. */
+function renderCancelledEvent(calEvent: CalendarEvent | null): string {
+  if (!calEvent) return "❌ This event was cancelled.";
+  return [
+    `❌ ~~**${calEvent.title}**~~ was cancelled.`,
+    `🕒 was ${time(calEvent.start, TimestampStyles.LongDateTime)}`,
+  ].join("\n");
+}
+
+/** Resolves the message bishop previously posted for an event, if it still exists. */
+async function fetchPostedMessage(eventId: string): Promise<Message | null> {
+  const stored = await getMessage(eventId);
+  if (!stored) return null;
+  const channel = await client.channels.fetch(stored.channelId).catch(() => null);
+  if (!channel?.isTextBased()) return null;
+  return channel.messages.fetch(stored.messageId).catch(() => null);
+}
+
+/** Posts a new calendar message and records it for later edits/deletes. */
+async function postEvent(event: GuildScheduledEvent, calEvent: CalendarEvent): Promise<void> {
+  const channel = await resolveAnnounceChannel(event);
+  if (!channel) {
+    console.warn(`No sendable channel found in ${event.guild?.name ?? "unknown guild"}.`);
+    return;
+  }
+  const message = await channel.send({
+    content: renderActiveEvent(calEvent),
+    files: [icsAttachment(calEvent)],
+  });
+  await rememberMessage(event.id, {
+    guildId: event.guildId,
+    channelId: channel.id,
+    messageId: message.id,
+  });
+  const channelName = "name" in channel ? `#${channel.name}` : "a DM channel";
+  console.log(`Posted calendar links for "${calEvent.title}" in ${channelName}.`);
+}
+
 client.once(Events.ClientReady, (c) => {
   console.log(`Bishop is online as ${c.user.tag}`);
 });
@@ -64,35 +131,48 @@ client.on(Events.GuildScheduledEventCreate, async (event) => {
     console.warn(`Scheduled event ${event.id} has no start time; skipping.`);
     return;
   }
+  await postEvent(event, calEvent);
+});
 
-  const channel = await resolveAnnounceChannel(event);
-  if (!channel) {
-    console.warn(`No sendable channel found in ${event.guild?.name ?? "unknown guild"}.`);
+client.on(Events.GuildScheduledEventUpdate, async (_oldEvent, event) => {
+  const calEvent = toCalendarEvent(event);
+  if (!calEvent) return;
+
+  // A completed event keeps its message as-is — nothing useful to change.
+  if (event.status === GuildScheduledEventStatus.Completed) return;
+
+  const message = await fetchPostedMessage(event.id);
+
+  if (event.status === GuildScheduledEventStatus.Canceled) {
+    if (message) {
+      await message.edit({ content: renderCancelledEvent(calEvent), files: [], attachments: [] });
+      await forgetMessage(event.id);
+      console.log(`Marked "${calEvent.title}" cancelled.`);
+    }
     return;
   }
 
-  const ics = new AttachmentBuilder(Buffer.from(buildIcs(calEvent), "utf8"), {
-    name: icsFilename(calEvent),
-    description: `Calendar file for ${calEvent.title}`,
+  // Scheduled/active: re-render with the latest details and a fresh .ics.
+  if (!message) {
+    await postEvent(event, calEvent);
+    return;
+  }
+  await message.edit({
+    content: renderActiveEvent(calEvent),
+    files: [icsAttachment(calEvent)],
+    attachments: [],
   });
+  console.log(`Updated calendar links for "${calEvent.title}".`);
+});
 
-  const whenLine = time(calEvent.start, TimestampStyles.LongDateTime);
-  const lines = [
-    `📅 **${calEvent.title}** was just scheduled.`,
-    `🕒 ${whenLine} (${time(calEvent.start, TimestampStyles.RelativeTime)})`,
-  ];
-  if (calEvent.location) lines.push(`📍 ${calEvent.location}`);
-  lines.push(
-    "",
-    "Add it to your calendar:",
-    `• [Google Calendar](${googleCalendarUrl(calEvent)})`,
-    `• [Outlook](${outlookCalendarUrl(calEvent)})`,
-    "• Apple / other: download the attached `.ics` file",
-  );
-
-  await channel.send({ content: lines.join("\n"), files: [ics] });
-  const channelName = "name" in channel ? `#${channel.name}` : "a DM channel";
-  console.log(`Posted calendar links for "${calEvent.title}" in ${channelName}.`);
+client.on(Events.GuildScheduledEventDelete, async (event) => {
+  const calEvent = toCalendarEvent(event);
+  const message = await fetchPostedMessage(event.id);
+  if (message) {
+    await message.edit({ content: renderCancelledEvent(calEvent), files: [], attachments: [] });
+    console.log(`Marked deleted event ${event.id} cancelled.`);
+  }
+  await forgetMessage(event.id);
 });
 
 client.login(token);
