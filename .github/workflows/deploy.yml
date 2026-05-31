@@ -1,0 +1,27 @@
+name: deploy
+
+# Auto-deploy on push to main, run by the self-hosted runner on the home
+# server. No inbound ports needed — the runner long-polls GitHub for jobs.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {} # lets you trigger a redeploy by hand from the Actions tab
+
+# Never run two deploys at once; let an in-flight one finish.
+concurrency:
+  group: bishop-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+    steps:
+      - name: Pull, install, restart
+        run: |
+          set -euo pipefail
+          cd "$HOME/bishop"
+          git fetch --prune origin
+          git reset --hard origin/main
+          npm ci --omit=dev
+          sudo systemctl restart bishop
+          echo "Deployed $(git rev-parse --short HEAD)"

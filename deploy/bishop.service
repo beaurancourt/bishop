@@ -1,0 +1,25 @@
+[Unit]
+Description=Bishop Discord bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# --- edit these two for your box ---
+User=beau
+WorkingDirectory=/home/beau/bishop
+# -----------------------------------
+# `npm start` runs `tsx src/index.ts`; dotenv loads .env from WorkingDirectory,
+# so no EnvironmentFile is needed. Requires node/npm on PATH (NodeSource puts
+# them at /usr/bin). If you use nvm, point ExecStart at that npm's full path.
+ExecStart=/usr/bin/npm start
+Restart=on-failure
+RestartSec=5
+
+# Light hardening
+NoNewPrivileges=true
+ProtectSystem=full
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
