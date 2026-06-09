@@ -16,6 +16,8 @@ export interface CalendarEvent {
   uid: string;
   /** When the source event was created/last modified, for DTSTAMP. */
   stamp?: Date;
+  /** Link back to the event in Discord (where members can RSVP). */
+  url?: string;
 }
 
 /** YYYYMMDDTHHMMSSZ in UTC, the form Google Calendar and iCalendar expect. */

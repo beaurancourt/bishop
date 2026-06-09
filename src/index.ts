@@ -7,6 +7,7 @@ import {
   GuildScheduledEvent,
   GuildScheduledEventStatus,
   type Message,
+  MessageFlags,
   type SendableChannels,
   TimestampStyles,
   time,
@@ -68,8 +69,12 @@ function icsAttachment(calEvent: CalendarEvent): AttachmentBuilder {
 
 /** Message body for an upcoming/active event, with calendar links. */
 function renderActiveEvent(calEvent: CalendarEvent): string {
+  // Title links to the event in Discord. Embeds are suppressed on the message
+  // (see postEvent), so this stays a plain clickable link rather than unfurling
+  // into Discord's event card + a generic site preview.
+  const title = calEvent.url ? `[${calEvent.title}](${calEvent.url})` : calEvent.title;
   const lines = [
-    `📅 **${calEvent.title}** is on the calendar.`,
+    `📅 **${title}** is on the calendar.`,
     `🕒 ${time(calEvent.start, TimestampStyles.LongDateTime)} (${time(calEvent.start, TimestampStyles.RelativeTime)})`,
   ];
   if (calEvent.location) lines.push(`📍 ${calEvent.location}`);
@@ -111,6 +116,7 @@ async function postEvent(event: GuildScheduledEvent, calEvent: CalendarEvent): P
   const message = await channel.send({
     content: renderActiveEvent(calEvent),
     files: [icsAttachment(calEvent)],
+    flags: MessageFlags.SuppressEmbeds,
   });
   await rememberMessage(event.id, {
     guildId: event.guildId,
@@ -161,6 +167,7 @@ client.on(Events.GuildScheduledEventUpdate, async (_oldEvent, event) => {
     content: renderActiveEvent(calEvent),
     files: [icsAttachment(calEvent)],
     attachments: [],
+    flags: MessageFlags.SuppressEmbeds,
   });
   console.log(`Updated calendar links for "${calEvent.title}".`);
 });

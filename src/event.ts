@@ -45,5 +45,6 @@ export function toCalendarEvent(event: AnyScheduledEvent): CalendarEvent | null 
     end,
     uid: `${event.id}@bishop.discord`,
     stamp: event.createdAt ?? start,
+    url: event.url,
   };
 }
