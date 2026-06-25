@@ -20,6 +20,7 @@ import {
   outlookCalendarUrl,
 } from "./calendar.js";
 import { toCalendarEvent } from "./event.js";
+import { startHttpServer } from "./http.js";
 import { forgetMessage, getMessage, rememberMessage } from "./store.js";
 
 const token = process.env.DISCORD_TOKEN;
@@ -129,6 +130,9 @@ async function postEvent(event: GuildScheduledEvent, calEvent: CalendarEvent): P
 
 client.once(Events.ClientReady, (c) => {
   console.log(`Bishop is online as ${c.user.tag}`);
+  // Local HTTP endpoint so on-box tools (e.g. the digest job) can ask bishop to
+  // DM a user. No-op unless BISHOP_HTTP_TOKEN is set.
+  startHttpServer(client);
 });
 
 client.on(Events.GuildScheduledEventCreate, async (event) => {
