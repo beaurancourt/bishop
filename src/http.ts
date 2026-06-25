@@ -15,7 +15,7 @@
  * on line boundaries and embeds are batched across multiple sends.
  */
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import type { Client } from "discord.js";
+import { type Client, MessageFlags } from "discord.js";
 
 const MAX_CONTENT = 2000;
 const MAX_EMBEDS = 10;
@@ -24,6 +24,9 @@ interface DmPayload {
   content?: string;
   embeds?: Record<string, unknown>[];
   recipientId?: string;
+  // Suppress auto-generated link-preview embeds on content messages (for
+  // digests that use masked Markdown links and don't want them unfurling).
+  suppressEmbeds?: boolean;
 }
 
 /** Read and JSON-parse a request body, rejecting anything oversized. */
@@ -119,9 +122,10 @@ export function startHttpServer(client: Client): void {
 
       const user = await client.users.fetch(recipientId);
 
+      const contentFlags = body.suppressEmbeds ? MessageFlags.SuppressEmbeds : undefined;
       let sent = 0;
       for (const chunk of content ? chunkContent(content) : []) {
-        await user.send({ content: chunk });
+        await user.send({ content: chunk, flags: contentFlags });
         sent++;
       }
       for (let i = 0; i < embeds.length; i += MAX_EMBEDS) {
