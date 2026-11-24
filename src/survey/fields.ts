@@ -1,6 +1,6 @@
 /**
- * The nineteen fast-path fields of the daily gut check-in, and the one place that
- * knows how a select-menu value becomes a stored answer.
+ * The twenty-two fast-path fields of the daily gut check-in, and the one place
+ * that knows how a select-menu value becomes a stored answer.
  *
  * The shape here is the storage shape: `answers` is keyed by `FieldKey`, and a
  * value is either a number, a string, or (for the multi-selects) a string
@@ -10,6 +10,10 @@
  * `foods_fodmap` and `foods_other`, because a high-FODMAP trigger and a fried
  * meal are different hypotheses. Entries written before the split keep their
  * `foods` values in the file; the export maps them (scripts/export.py).
+ *
+ * The reflux side is three fields of its own, deliberately not overlapping with
+ * the food lists: a food that is also a reflux trigger is recorded once. The
+ * export derives the trigger day from all of them (scripts/export.py).
  */
 
 /** Multi-select sentinel: "none" means the list is empty for that day. */
@@ -40,7 +44,10 @@ export type FieldKey =
   | "caffeine"
   | "alcohol"
   | "last_meal"
-  | "spicy";
+  | "spicy"
+  | "reflux_triggers"
+  | "lay_down_after_eating"
+  | "portion_size";
 
 export type FieldKind = "scale" | "enum" | "bristol" | "multi";
 
@@ -166,6 +173,25 @@ export const LAST_MEAL_OPTIONS: FieldOption[] = enumOptions(
 );
 
 /**
+ * The reflux triggers that are not on either food list. Mint, citrus and tomato
+ * are recorded here and nowhere else, so a trigger is never tapped twice; the
+ * food values that are also reflux triggers stay in `foods_other` and the
+ * export unions them (scripts/export.py).
+ */
+export const REFLUX_TRIGGER_OPTIONS: FieldOption[] = enumOptions(
+  "mint",
+  "citrus",
+  "tomato",
+  NONE,
+);
+
+/** Lying down within two hours of eating is the second half of the night question. */
+export const LAY_DOWN_OPTIONS: FieldOption[] = enumOptions("yes", "no");
+
+/** Portion size stays categorical, for the same reason the servings do. */
+export const PORTION_OPTIONS: FieldOption[] = enumOptions("small", "medium", "large");
+
+/**
  * Where the pain sat, in the words a clinic uses. The quadrant matters: right
  * upper points at the gallbladder, epigastric at gastritis, right lower at the
  * appendix, left lower at the colon.
@@ -200,11 +226,13 @@ export const SYMPTOM_OPTIONS: FieldOption[] = enumOptions(
  * Page 3: the night question, stress, and the two food lists side by side.
  * Page 4: medication, sleep, the meals, and caffeine servings.
  * Page 5: alcohol, the last meal, and spicy or acidic food.
+ * Page 6: the reflux side — the triggers that are not foods, lying down after
+ * eating, and portion size.
  *
  * Discord allows five action rows per message and one component per row for a
  * select menu, so a page carries at most four menus plus its button row. The
- * nineteen fields therefore need five pages; `PAGE_COUNT` follows the assignments
- * below, and a test asserts the row budget for every page.
+ * twenty-two fields therefore need six pages; `PAGE_COUNT` follows the
+ * assignments below, and a test asserts the row budget for every page.
  */
 export const FIELDS: FieldDef[] = [
   {
@@ -364,6 +392,30 @@ export const FIELDS: FieldDef[] = [
     kind: "enum",
     page: 5,
     options: enumOptions("yes", "no"),
+  },
+  {
+    key: "reflux_triggers",
+    prompt: "Reflux triggers today (choose any)",
+    placeholder: "reflux triggers",
+    kind: "multi",
+    page: 6,
+    options: REFLUX_TRIGGER_OPTIONS,
+  },
+  {
+    key: "lay_down_after_eating",
+    prompt: "Lay down within 2 h of eating",
+    placeholder: "lay down after eating",
+    kind: "enum",
+    page: 6,
+    options: LAY_DOWN_OPTIONS,
+  },
+  {
+    key: "portion_size",
+    prompt: "Portion size",
+    placeholder: "portion size",
+    kind: "enum",
+    page: 6,
+    options: PORTION_OPTIONS,
   },
 ];
 

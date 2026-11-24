@@ -44,9 +44,9 @@ function componentsOf(message: ReturnType<typeof buildSurveyMessage>): RawCompon
 const rowsOf = (message: ReturnType<typeof buildSurveyMessage>) =>
   message.components as unknown as RawComponent[];
 
-test("the nineteen fast-path fields are all present and none is repeated", () => {
-  assert.equal(FIELDS.length, 19);
-  assert.equal(new Set(FIELD_KEYS).size, 19);
+test("the twenty-two fast-path fields are all present and none is repeated", () => {
+  assert.equal(FIELDS.length, 22);
+  assert.equal(new Set(FIELD_KEYS).size, 22);
   assert.deepEqual(
     [...FIELD_KEYS].sort(),
     [
@@ -58,10 +58,13 @@ test("the nineteen fast-path fields are all present and none is repeated", () =>
       "foods_fodmap",
       "foods_other",
       "last_meal",
+      "lay_down_after_eating",
       "meals",
       "medications",
       "other_symptoms",
       "pain_location",
+      "portion_size",
+      "reflux_triggers",
       "sleep",
       "spicy",
       "stress",
@@ -74,7 +77,7 @@ test("the nineteen fast-path fields are all present and none is repeated", () =>
 });
 
 test("every page fits Discord's five action rows and five components per row", () => {
-  assert.equal(PAGE_COUNT, 5);
+  assert.equal(PAGE_COUNT, 6);
   const seen = new Set<string>();
   for (let page = 1; page <= PAGE_COUNT; page += 1) {
     const message = buildSurveyMessage(DATE, {}, page);
@@ -91,7 +94,7 @@ test("every page fits Discord's five action rows and five components per row", (
     }
     for (const field of fields) seen.add(field.key);
   }
-  assert.equal(seen.size, 19);
+  assert.equal(seen.size, 22);
 });
 
 test("each select's custom id carries the date and the field, and parses back", () => {
@@ -263,7 +266,45 @@ test("the diet questions store exactly the spec's answer values", () => {
     assert.equal(FIELDS.find((field) => field.key === key)?.page, 5);
   }
   // The counter copy reports the new total, not the old eighteen.
-  assert.match(buildSurveyMessage(DATE, {}, 1).content, /answered 0 of 19/);
+  assert.match(buildSurveyMessage(DATE, {}, 1).content, /answered 0 of 22/);
+});
+
+test("the reflux fields store the spec's values and round-trip onto page six", () => {
+  const values = (key: string) => fieldByKey(key)?.options.map((option) => option.value);
+  assert.deepEqual(values("reflux_triggers"), ["mint", "citrus", "tomato", "none"]);
+  assert.deepEqual(values("lay_down_after_eating"), ["yes", "no"]);
+  assert.deepEqual(values("portion_size"), ["small", "medium", "large"]);
+
+  // The reflux triggers are a multi-select, and none never coexists with a real
+  // item, exactly as the food lists behave.
+  let answers = applyAnswer({}, "reflux_triggers", ["mint", "citrus"]);
+  assert.deepEqual(answers.reflux_triggers, ["mint", "citrus"]);
+  answers = applyAnswer(answers, "lay_down_after_eating", ["yes"]);
+  answers = applyAnswer(answers, "portion_size", ["large"]);
+  assert.equal(answers.lay_down_after_eating, "yes");
+  assert.equal(answers.portion_size, "large");
+  answers = applyAnswer(answers, "reflux_triggers", ["none", "tomato"]);
+  assert.deepEqual(answers.reflux_triggers, ["tomato"]);
+  answers = applyAnswer(answers, "reflux_triggers", ["none"]);
+  assert.deepEqual(answers.reflux_triggers, ["none"]);
+
+  const page = buildSurveyMessage(DATE, answers, 6);
+  const selected = (key: string) =>
+    (componentsOf(page)
+      .find((component) => component.custom_id === customIds.field(DATE, key))
+      ?.options ?? [])
+      .filter((option) => option.default)
+      .map((option) => option.value);
+  assert.deepEqual(selected("reflux_triggers"), ["none"]);
+  assert.deepEqual(selected("lay_down_after_eating"), ["yes"]);
+  assert.deepEqual(selected("portion_size"), ["large"]);
+
+  // The three sit together on page six, inside the four-select, five-row budget.
+  for (const key of ["reflux_triggers", "lay_down_after_eating", "portion_size"]) {
+    assert.equal(fieldByKey(key)?.page, 6);
+  }
+  assert.equal(fieldsOnPage(6).length, 3);
+  assert.equal(rowsOf(page).length, 4);
 });
 
 test("the symptom fields store exactly the spec's answer values", () => {
@@ -373,7 +414,7 @@ test("the food question is two lists, split by the spec's groups", () => {
 
 test("a submission missing fields is named, not written", () => {
   const answers = applyAnswer({}, "worst_pain", ["3"]);
-  assert.equal(missingFields(answers).length, 18);
+  assert.equal(missingFields(answers).length, 21);
   const notice = missingFieldsNotice(answers);
   assert.ok(notice?.includes("Bloating"));
   assert.ok(!notice?.includes("Worst abdominal pain"));

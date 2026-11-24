@@ -45,6 +45,9 @@ const entry = (date: string, answers: Record<string, unknown>, extra: Record<str
     spicy: "yes",
     pain_location: "upper right",
     other_symptoms: ["nausea", "cold sweats"],
+    reflux_triggers: ["none"],
+    lay_down_after_eating: "no",
+    portion_size: "medium",
     ...answers,
   },
   notes: { other: "", red_flags_note: "" },
@@ -115,6 +118,9 @@ skipUnlessPython("the CSV has one column per field plus notes and flags", async 
     "spicy",
     "pain_location",
     "other_symptoms",
+    "reflux_triggers",
+    "lay_down_after_eating",
+    "portion_size",
     "notes_other",
     "notes_other_meds",
     "notes_other_foods",
@@ -223,6 +229,9 @@ skipUnlessPython("an entry from before the diet fields exports blanks, not zeros
     "spicy",
     "pain_location",
     "other_symptoms",
+    "reflux_triggers",
+    "lay_down_after_eating",
+    "portion_size",
   ]) {
     assert.equal(cells[columns.indexOf(key)], "", `${key} is blank when it was never asked`);
   }
@@ -328,6 +337,76 @@ skipUnlessPython("an entry from before the food split maps its foods into the tw
   assert.match(md.stdout, /\| other \| fried\/fatty \(before the split\) \| 1 \|/);
   assert.match(md.stdout, /\| high-FODMAP \| mushroom \| 1 \| 0 \| — \|/);
   assert.match(md.stdout, /\| other \| chocolate \| 1 \| 0 \| — \|/);
+});
+
+skipUnlessPython("the reflux fields round-trip, and the trigger day is their union", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "bishop-export-reflux-"));
+  t.after(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+  // Four hand-built days: one trigger from each clause the new fields touch,
+  // then one clean day. The clean day keeps a large portion, which is a value
+  // of its own and not a trigger, to show the count uses only the formula.
+  const clean = {
+    reflux_triggers: ["none"],
+    foods_other: ["none"],
+    last_meal: "2–3 h",
+    lay_down_after_eating: "no",
+    portion_size: "large",
+  };
+  const lines = [
+    entry("2026-11-01", { ...clean, reflux_triggers: ["mint"] }),
+    entry("2026-11-02", { ...clean, foods_other: ["chocolate"] }),
+    entry("2026-11-03", { ...clean, last_meal: "within 2 h" }),
+    entry("2026-11-04", clean),
+  ];
+  await writeFile(
+    join(dir, "2026-11.jsonl"),
+    lines.map((item) => JSON.stringify(item)).join("\n") + "\n",
+    "utf8",
+  );
+
+  const csv = await run("python3", [
+    SCRIPT,
+    "--month",
+    "2026-11",
+    "--format",
+    "csv",
+    "--data-dir",
+    dir,
+  ]);
+  const [header, ...body] = csv.stdout.trim().split("\n");
+  const columns = header.split(",");
+  // The notes are empty in this fixture, so no cell is quoted and splitting on
+  // commas is safe, as in the food-split test above.
+  const cell = (line: string, key: string) => line.split(",")[columns.indexOf(key)];
+  assert.equal(cell(body[0], "reflux_triggers"), "mint");
+  assert.equal(cell(body[1], "reflux_triggers"), "none");
+  assert.equal(cell(body[1], "lay_down_after_eating"), "no");
+  assert.equal(cell(body[2], "portion_size"), "large");
+
+  const md = await run("python3", [
+    SCRIPT,
+    "--month",
+    "2026-11",
+    "--format",
+    "md",
+    "--data-dir",
+    dir,
+  ]);
+  assert.match(md.stdout, /## Reflux/);
+  assert.match(md.stdout, /- Trigger days: 3 of 4\./);
+  assert.match(
+    md.stdout,
+    /A day counts when `reflux_triggers` has mint, citrus or tomato; or `foods_other` has chocolate, caffeine, alcohol, carbonated or fried or fatty; or `last_meal` is `within 2 h`; or `lay_down_after_eating` is `yes`\./,
+    "the formula travels beside the number, so the CSV recomputes it",
+  );
+  assert.match(md.stdout, /reflux_triggers mint\/citrus\/tomato 1/);
+  assert.match(md.stdout, /foods_other chocolate\/caffeine\/alcohol\/carbonated\/fried or fatty 1/);
+  assert.match(md.stdout, /last meal within 2 h 1/);
+  assert.match(md.stdout, /lay down after eating 0/);
+  assert.match(md.stdout, /- Reflux triggers: mint 1 \(of 4 days with an answer\)/);
+  assert.match(md.stdout, /- Portion size: large on 4 days/);
 });
 
 skipUnlessPython("the script refuses to write inside the repository", async (t) => {

@@ -37,6 +37,9 @@ function fullAnswers(): Answers {
     spicy: "yes",
     pain_location: "upper right",
     other_symptoms: ["nausea", "cold sweats"],
+    reflux_triggers: ["none"],
+    lay_down_after_eating: "no",
+    portion_size: "medium",
   };
 }
 
@@ -181,7 +184,7 @@ test("the Next button is acknowledged before the draft file is written", async (
   assert.deepEqual(click.events, ["deferUpdate", "editReply"], "ack, then edit; never a bare update");
   assert.equal(fileAtAck, false, "no file work may happen before the acknowledgement");
   assert.equal(existsSync(draftsFile()), true, "the page change is on disk");
-  assert.match(String(click.edits.at(-1)?.content), /Page 2 of 5/);
+  assert.match(String(click.edits.at(-1)?.content), /Page 2 of 6/);
 });
 
 test("an expired click gets a sentence instead of a 10062", async (t) => {
@@ -296,7 +299,7 @@ test("the symptom answers round-trip into the submitted entry", async (t) => {
   const stored = JSON.parse((await monthLines(dir))[0]) as { answers: Answers };
   assert.equal(stored.answers.pain_location, "upper right");
   assert.deepEqual(stored.answers.other_symptoms, ["nausea", "cold sweats"]);
-  // The nineteen-fast-path entry keeps every earlier id and value.
+  // The twenty-two-fast-path entry keeps every earlier id and value.
   assert.equal(stored.answers.worst_pain, 7);
   assert.deepEqual(stored.answers.foods_fodmap, ["dairy"]);
   assert.equal(stored.answers.last_meal, "2–3 h");
@@ -322,7 +325,7 @@ test("a restart between the prompt and Next keeps the earlier answers", async (t
   await handleInteraction(next.interaction);
 
   assert.deepEqual(next.events, ["deferUpdate", "editReply"]);
-  assert.match(String(next.edits.at(-1)?.content), /answered 1 of 19/);
+  assert.match(String(next.edits.at(-1)?.content), /answered 1 of 22/);
 });
 
 test("a select menu answer is acknowledged before it is stored", async (t) => {
@@ -341,7 +344,7 @@ test("a select menu answer is acknowledged before it is stored", async (t) => {
 
   assert.deepEqual(click.events, ["deferUpdate", "editReply"]);
   assert.equal(fileAtAck, false);
-  assert.match(String(click.edits.at(-1)?.content), /answered 1 of 19/);
+  assert.match(String(click.edits.at(-1)?.content), /answered 1 of 22/);
   assert.equal(drafts.get(USER, DATE)?.answers.worst_pain, 7);
   assert.equal(existsSync(join(dir, "drafts.json")), true);
 });
@@ -371,8 +374,8 @@ test("the confirmation keeps Add notes and Edit tonight, and a resubmit replaces
   // Edit tonight reopens page one on the entry that was just stored.
   const edit = fakeInteraction({ customId: `survey:${DATE}:edit`, isButton: true });
   await handleInteraction(edit.interaction);
-  assert.match(String(edit.edits.at(-1)?.content), /Page 1 of 5/);
-  assert.match(String(edit.edits.at(-1)?.content), /answered 19 of 19/);
+  assert.match(String(edit.edits.at(-1)?.content), /Page 1 of 6/);
+  assert.match(String(edit.edits.at(-1)?.content), /answered 22 of 22/);
   assert.equal(drafts.get(USER, DATE)?.answers.worst_pain, 7, "the stored answers came back");
 
   // One answer changes, then Submit again.
@@ -470,8 +473,8 @@ test("a restart between Submit and the confirmation buttons does not break them"
 
   const edit = fakeInteraction({ customId: `survey:${DATE}:edit`, isButton: true });
   await handleInteraction(edit.interaction);
-  assert.match(String(edit.edits.at(-1)?.content), /Page 1 of 5/);
-  assert.match(String(edit.edits.at(-1)?.content), /answered 19 of 19/);
+  assert.match(String(edit.edits.at(-1)?.content), /Page 1 of 6/);
+  assert.match(String(edit.edits.at(-1)?.content), /answered 22 of 22/);
   assert.equal(drafts.get(USER, DATE)?.answers.bloating, 3);
 
   const again = fakeInteraction({ customId: `survey:${DATE}:submit`, isButton: true });
@@ -536,7 +539,7 @@ test("other stores the answer first, then asks what it was, and keeps the words"
   assert.deepEqual(modal.events, ["update"], "the submit edits the prompt once; no deferral as well");
   assert.equal(modal.edits.length, 1);
   assert.match(String(modal.edits[0].content), /Other medication: ibuprofen/);
-  assert.match(String(modal.edits[0].content), /Page 4 of 5/, "the page she answered stays in view");
+  assert.match(String(modal.edits[0].content), /Page 4 of 6/, "the page she answered stays in view");
   assert.equal(drafts.get(USER, DATE)?.notes.other_meds, "ibuprofen", "the words are trimmed");
 
   const submit = fakeInteraction({ customId: `survey:${DATE}:submit`, isButton: true });

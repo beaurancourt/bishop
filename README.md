@@ -61,7 +61,7 @@ links in the configured channel (or the system channel by default).
 
 ## Daily gut check-in
 
-A 21:00 DM diary for a GI clinic: nineteen select menus, a **Notes** modal, and a
+A 21:00 DM diary for a GI clinic: twenty-two select menus, a **Notes** modal, and a
 "Which other?" modal for a select answered with `other`; no typed commands and no
 privileged intents. It is a separate feature from the calendar path and does not
 read or write anything the calendar path uses.
@@ -101,7 +101,7 @@ confirmation keeps **Add notes** and **Edit tonight**: both rebuild that date's
 draft from the stored entry, so they still work after a restart, and a resubmit
 corrects the one line.
 
-`answers` has the nineteen fields: `worst_pain`, `bloating`, `upper_gi`,
+`answers` has the twenty-two fields: `worst_pain`, `bloating`, `upper_gi`,
 `pain_location` (none / upper middle / upper right / around the navel / lower
 right / lower left / all over), `other_symptoms` (a list: nausea, vomiting, cold
 sweats, cramping, fatigue, headache, dizziness, fever, mucus in stool), then
@@ -111,9 +111,12 @@ apple/pear, stone fruit, honey/HFCS/sorbitol, mushroom, cauliflower/broccoli,
 avocado, mango/watermelon, rye/barley, none), `foods_other` (a list: chocolate,
 sweets/desserts, fried or fatty, lean or low-fat meals, carbonated, caffeine,
 alcohol, spicy, artificial sweeteners, none), `medications`, `stress`, `sleep`,
-`meals` (a list), `caffeine`, `alcohol`, `last_meal`, `spicy`. Diet, pain
-location and symptoms arrived after the first entries; a line without them
-exports a blank cell, not a zero.
+`meals` (a list), `caffeine`, `alcohol`, `last_meal`, `spicy`, and the reflux
+side: `reflux_triggers` (a list: mint, citrus, tomato, none — deliberately not
+overlapping the food lists, so a trigger is tapped once), `lay_down_after_eating`
+(yes/no), `portion_size` (small/medium/large). Diet, pain location, symptoms and
+the reflux fields arrived after the first entries; a line without them exports a
+blank cell, not a zero.
 
 The food question used to be one `foods` list. Entries from before the split keep
 their `foods` values in the file: the export maps each value into the list that
@@ -131,8 +134,9 @@ so its submit re-renders the prompt in one response; a modal that did not come
 from one gets an ephemeral sentence instead. The same path covers a food list if
 one ever offers `other` (`notes.other_foods`).
 
-The nineteen selects are split over five pages, at most four per page plus the
-page's button row, which is Discord's five-row limit per message.
+The twenty-two selects are split over six pages, at most four per page plus the
+page's button row, which is Discord's five-row limit per message. The reflux
+fields are the last page, on their own.
 
 Red flags are detected from the notes box (the alarm list in the spec has no
 yes/no field in the fast path). When one fires, the confirmation says to contact
@@ -154,7 +158,11 @@ hand. The CSV's notes columns are `notes_other`, `notes_other_meds`,
 notes only on the days she typed something. The summary reports adherence,
 severity medians, the Bristol distribution, the diet counts, and for each food
 group the list it came from, the days eaten with the mean next-day pain, and that
-mean's denominator (`n`).
+mean's denominator (`n`). It also states the derived reflux trigger-day count
+with its formula, so the number recomputes from the CSV: a day counts when
+`reflux_triggers` has mint, citrus or tomato, or `foods_other` has chocolate,
+caffeine, alcohol, carbonated or fried or fatty, or `last_meal` is `within 2 h`,
+or `lay_down_after_eating` is `yes`.
 
 ### Scheduling and safety notes
 

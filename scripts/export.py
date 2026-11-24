@@ -55,13 +55,27 @@ FIELD_COLUMNS: list[tuple[str, str]] = [
     # blank cell here, which is what "not asked" looks like.
     ("pain_location", "pain_location"),
     ("other_symptoms", "other_symptoms"),
+    # The reflux side; a line recorded before it exports blank cells, as above.
+    ("reflux_triggers", "reflux_triggers"),
+    ("lay_down_after_eating", "lay_down_after_eating"),
+    ("portion_size", "portion_size"),
 ]
-LIST_FIELDS = {"foods_fodmap", "foods_other", "medications", "meals", "other_symptoms"}
+LIST_FIELDS = {
+    "foods_fodmap",
+    "foods_other",
+    "medications",
+    "meals",
+    "other_symptoms",
+    "reflux_triggers",
+}
 
 # The daily set's own order, used to lay out the diet counters.
 MEAL_ORDER = ["breakfast", "lunch", "dinner", "snacks"]
 SERVING_ORDER = ["0", "1", "2", "3+"]
 LAST_MEAL_ORDER = ["more than 3 h", "2–3 h", "within 2 h", "did not eat"]
+REFLUX_TRIGGER_ORDER = ["mint", "citrus", "tomato"]
+LAY_DOWN_ORDER = ["yes", "no"]
+PORTION_ORDER = ["small", "medium", "large"]
 
 # Display order and labels for the rows of the food table, one group per list.
 # These are the stored values of the two menus, so a CSV cell and a summary row
@@ -229,6 +243,55 @@ def cell(entry: dict, key: str) -> str:
         return "; ".join(str(item) for item in value)
     value = entry.get("answers", {}).get(key)
     return "" if value is None else str(value)
+
+
+# The derived trigger day, exactly as the spec states it: the reflux fields,
+# unioned with the food values that are also reflux triggers, a late last meal,
+# and lying down after eating. The summary prints this formula beside the count
+# so anyone can recompute the number from the CSV's own columns.
+REFLUX_TRIGGER_FOODS = ["mint", "citrus", "tomato"]
+REFLUX_RELEVANT_OTHER_FOODS = [
+    "chocolate",
+    "caffeine",
+    "alcohol",
+    "carbonated",
+    "fried or fatty",
+]
+REFLUX_CLAUSE_ORDER = [
+    ("triggers", "reflux_triggers mint/citrus/tomato"),
+    ("foods", "foods_other chocolate/caffeine/alcohol/carbonated/fried or fatty"),
+    ("late", "last meal within 2 h"),
+    ("lay_down", "lay down after eating"),
+]
+REFLUX_FORMULA = (
+    "`reflux_triggers` has mint, citrus or tomato; or `foods_other` has chocolate, "
+    "caffeine, alcohol, carbonated or fried or fatty; or `last_meal` is `within 2 h`; "
+    "or `lay_down_after_eating` is `yes`"
+)
+
+
+def reflux_clauses(entry: dict) -> list[str]:
+    """The clauses of the spec's trigger-day formula this entry satisfies.
+
+    A blank cell satisfies nothing, so a day recorded before these fields is not
+    a trigger day. An old `foods` line is read through `food_items`, the same
+    cells the CSV shows.
+    """
+    answers = entry.get("answers", {})
+    clauses: list[str] = []
+    triggers = answers.get("reflux_triggers")
+    if isinstance(triggers, list) and any(
+        str(item) in REFLUX_TRIGGER_FOODS for item in triggers
+    ):
+        clauses.append("triggers")
+    others = food_items(entry, "foods_other") or []
+    if any(item in REFLUX_RELEVANT_OTHER_FOODS for item in others):
+        clauses.append("foods")
+    if answers.get("last_meal") == "within 2 h":
+        clauses.append("late")
+    if answers.get("lay_down_after_eating") == "yes":
+        clauses.append("lay_down")
+    return clauses
 
 
 def flag_labels(entry: dict) -> list[str]:
@@ -435,6 +498,44 @@ def write_markdown(entries: list[dict], month: date, stream) -> None:
     write(exposure_row("alcohol (1+)", exposed("alcohol", {"1", "2", "3+"})))
     write(exposure_row("spicy or acidic", exposed("spicy", {"yes"})))
     write(exposure_row("last meal within 2 h", exposed("last_meal", {"within 2 h"})))
+    write("\n")
+
+    # --- reflux --------------------------------------------------------------
+    # One derived day, printed with its formula: the four inputs are CSV
+    # columns, so the number is reproducible from the export itself.
+    trigger_days = 0
+    clause_days: Counter = Counter()
+    for entry in entries:
+        clauses = reflux_clauses(entry)
+        if clauses:
+            trigger_days += 1
+            clause_days.update(clauses)
+
+    reflux_triggers, reflux_answered = list_counter(entries, "reflux_triggers")
+    lay_down = value_counter(entries, "lay_down_after_eating")
+    portion = value_counter(entries, "portion_size")
+    trigger_values = ", ".join(
+        f"{value} {reflux_triggers[value]}" for value in REFLUX_TRIGGER_ORDER if reflux_triggers[value]
+    )
+
+    write("## Reflux\n\n")
+    write(
+        f"- Trigger days: {trigger_days} of {len(entries)}. A day counts when "
+        f"{REFLUX_FORMULA}. The four inputs are CSV columns; a blank cell is not a yes.\n"
+    )
+    write(
+        "- By clause: "
+        + ", ".join(f"{label} {clause_days[key]}" for key, label in REFLUX_CLAUSE_ORDER)
+        + " (a day can meet more than one; the trigger count is the union)\n"
+    )
+    write(
+        "- Reflux triggers: "
+        + (trigger_values if trigger_values else "none recorded")
+        + (f" (of {reflux_answered} days with an answer)" if reflux_answered else "")
+        + "\n"
+    )
+    write(f"- Lay down within 2 h of eating: {bucket_days(lay_down, LAY_DOWN_ORDER)}\n")
+    write(f"- Portion size: {bucket_days(portion, PORTION_ORDER)}\n")
     write("\n")
 
     # --- red flags -----------------------------------------------------------
