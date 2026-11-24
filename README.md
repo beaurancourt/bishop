@@ -87,6 +87,12 @@ data/survey/state.json      who has seen the intro, who is paused
 data/survey/drafts.json     half-finished check-ins, one per user and evening
 ```
 
+The directory is created `0700` and every file `0600`, set with `chmod` after
+each create rather than left to the umask, so no other account on the host can
+read the health data. A file an earlier version left `0644` is tightened on its
+next write; `data/` itself stays as it is, because the calendar bot keeps
+`data/messages.json` there.
+
 An entry is `{date, user, started_at, submitted_at, answers, notes, red_flags}`,
 serialised with `JSON.stringify` (a note with quotes or newlines cannot break the
 line). Submitting again for the same date rewrites that line instead of adding

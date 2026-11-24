@@ -12,11 +12,11 @@
  * rename), with writes serialised: two people clicking at the same moment do
  * not overwrite each other. A missing or unreadable file is empty, never fatal.
  */
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { SurveyNotes } from "./entry.js";
 import type { Answers } from "./fields.js";
-import { surveyDir } from "./storage.js";
+import { ensureSurveyDir, surveyDir, writeAtomic } from "./storage.js";
 
 export interface Draft {
   userId: string;
@@ -55,12 +55,6 @@ function isDraft(value: unknown): value is Draft {
     typeof draft.notes === "object" &&
     draft.notes !== null
   );
-}
-
-async function writeAtomic(file: string, body: string): Promise<void> {
-  const temp = `${file}.${process.pid}.tmp`;
-  await writeFile(temp, body, "utf8");
-  await rename(temp, file);
 }
 
 export class DraftStore {
@@ -139,7 +133,7 @@ export class DraftStore {
   persist(): Promise<void> {
     const body = `${JSON.stringify({ drafts: Object.fromEntries(this.drafts) }, null, 2)}\n`;
     const write = this.writes.then(async () => {
-      await mkdir(surveyDir(this.dir), { recursive: true });
+      await ensureSurveyDir(this.dir);
       await writeAtomic(draftsFile(this.dir), body);
     });
     this.writes = write.catch(() => undefined);

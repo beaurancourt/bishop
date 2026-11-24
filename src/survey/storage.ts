@@ -14,7 +14,7 @@
  * the file. Writes go to a temporary file and are renamed into place, and
  * concurrent writers are serialised per directory.
  */
-import { mkdir, readdir, readFile, rename, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { SurveyEntry } from "./entry.js";
 
@@ -53,9 +53,33 @@ function withLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
   return next;
 }
 
-async function writeAtomic(file: string, body: string): Promise<void> {
+/**
+ * What is written here is health data, so only the account that runs bishop may
+ * read it. The modes are applied with `chmod` after every create because a
+ * umask masks the mode passed to `open` and `mkdir`: under the usual 022 the
+ * files would otherwise be 0644 in a 0755 directory. Tightening also repairs
+ * files and a directory that an earlier version left world-readable.
+ */
+export const DIR_MODE = 0o700;
+export const FILE_MODE = 0o600;
+
+/** Creates the survey directory, or tightens one that already exists. */
+export async function ensureSurveyDir(dir?: string): Promise<string> {
+  const path = surveyDir(dir);
+  await mkdir(path, { recursive: true, mode: DIR_MODE });
+  await chmod(path, DIR_MODE);
+  return path;
+}
+
+/**
+ * Replaces `file` whole: the temporary file is created with the final mode, so
+ * a half-written file is never readable either, and the rename carries that
+ * mode onto the file it replaces.
+ */
+export async function writeAtomic(file: string, body: string): Promise<void> {
   const temp = `${file}.${process.pid}.tmp`;
-  await writeFile(temp, body, "utf8");
+  await writeFile(temp, body, { encoding: "utf8", mode: FILE_MODE });
+  await chmod(temp, FILE_MODE);
   await rename(temp, file);
 }
 
@@ -114,7 +138,7 @@ export function saveEntry(entry: SurveyEntry, dir?: string): Promise<SaveResult>
       return line;
     });
     if (!replaced) output.push(JSON.stringify(entry));
-    await mkdir(surveyDir(dir), { recursive: true });
+    await ensureSurveyDir(dir);
     await writeAtomic(file, `${output.join("\n")}\n`);
     const monthCount = output.filter((line) => {
       try {
@@ -219,7 +243,7 @@ export async function readState(dir?: string): Promise<SurveyState> {
 }
 
 async function writeState(state: SurveyState, dir?: string): Promise<void> {
-  await mkdir(surveyDir(dir), { recursive: true });
+  await ensureSurveyDir(dir);
   await writeAtomic(stateFile(dir), `${JSON.stringify(state, null, 2)}\n`);
 }
 
