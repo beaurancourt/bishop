@@ -14,6 +14,7 @@ import {
   NOTES_FLAGS_INPUT,
   NOTES_OTHER_INPUT,
   buildSurveyMessage,
+  confirmationRow,
   customIds,
   formatDateLabel,
   introMessage,
@@ -130,6 +131,32 @@ test("the last page has Notes and Submit, both tied to the date", () => {
   assert.equal(submit?.custom_id, customIds.submit(DATE));
   assert.deepEqual(parseCustomId(submit!.custom_id!), { kind: "submit", date: DATE });
   assert.deepEqual(parseCustomId(notes!.custom_id!), { kind: "notes", date: DATE });
+});
+
+test("the last page's copy sends her to Notes before Submit", () => {
+  const last = buildSurveyMessage(DATE, {}, PAGE_COUNT);
+  assert.match(last.content, /\*\*Notes\*\*/);
+  assert.match(last.content, /then press \*\*Submit\*\*/);
+  // Pages before the last do not carry the Submit instruction yet.
+  assert.doesNotMatch(buildSurveyMessage(DATE, {}, 1).content, /then press \*\*Submit\*\*/);
+});
+
+test("the confirmation row offers Add notes and Edit tonight for that date", () => {
+  const row = confirmationRow(DATE);
+  const buttons = (row as unknown as { components: RawComponent[] }).components;
+  assert.deepEqual(
+    buttons.map((button) => button.label),
+    ["Add notes", "Edit tonight"],
+  );
+  assert.deepEqual(buttons.map((button) => button.custom_id), [
+    customIds.notes(DATE),
+    customIds.edit(DATE),
+  ]);
+  assert.deepEqual(parseCustomId(customIds.edit(DATE)), { kind: "edit", date: DATE });
+  assert.deepEqual(parseCustomId("survey:2026-11-22:edit"), {
+    kind: "edit",
+    date: "2026-11-22",
+  });
 });
 
 test("paging buttons point at the neighbouring pages", () => {

@@ -31,6 +31,7 @@ export type SurveyCustomId =
   | { kind: "field"; date: string; field: string }
   | { kind: "page"; date: string; page: number }
   | { kind: "notes"; date: string }
+  | { kind: "edit"; date: string }
   | { kind: "submit"; date: string }
   | { kind: "notes-modal"; date: string }
   | { kind: "pause" }
@@ -42,6 +43,7 @@ export const customIds = {
   field: (date: string, field: string) => `${CUSTOM_ID_PREFIX}:${date}:field:${field}`,
   page: (date: string, page: number) => `${CUSTOM_ID_PREFIX}:${date}:page:${page}`,
   notes: (date: string) => `${CUSTOM_ID_PREFIX}:${date}:notes`,
+  edit: (date: string) => `${CUSTOM_ID_PREFIX}:${date}:edit`,
   submit: (date: string) => `${CUSTOM_ID_PREFIX}:${date}:submit`,
   notesModal: (date: string) => `${CUSTOM_ID_PREFIX}:${date}:notes-modal`,
   pause: () => `${CUSTOM_ID_PREFIX}:pause`,
@@ -82,6 +84,8 @@ export function parseCustomId(raw: string): SurveyCustomId | null {
     }
     case "notes":
       return { kind: "notes", date };
+    case "edit":
+      return { kind: "edit", date };
     case "submit":
       return { kind: "submit", date };
     case "notes-modal":
@@ -195,7 +199,7 @@ export function buildSurveyMessage(date: string, answers: Answers, page = 1): Su
     `Page ${page} of ${PAGE_COUNT} · answered ${answeredCount(answers)} of ${FIELDS.length}.`,
   );
   if (page === PAGE_COUNT) {
-    content.push("When all eleven are in, press **Submit**.");
+    content.push("When all eleven are in, put anything else in **Notes**, then press **Submit**.");
   }
 
   const components: APIActionRowComponent<APIComponentInMessageActionRow>[] = fields.map((field) =>
@@ -272,6 +276,24 @@ export function submitRow(date: string): APIActionRowComponent<APIComponentInMes
   return {
     type: 1,
     components: [{ type: 2, style: 3, label: "Submit", custom_id: customIds.submit(date) }],
+  };
+}
+
+/**
+ * What the confirmation offers after Submit. Both buttons carry the entry's
+ * date, so a click days later still edits that evening rather than today's
+ * blank draft: Add notes reopens the notes modal on the stored notes, and Edit
+ * tonight reopens page one on the stored answers, ready for a resubmit.
+ */
+export function confirmationRow(
+  date: string,
+): APIActionRowComponent<APIComponentInMessageActionRow> {
+  return {
+    type: 1,
+    components: [
+      { type: 2, style: 2, label: "Add notes", custom_id: customIds.notes(date) },
+      { type: 2, style: 2, label: "Edit tonight", custom_id: customIds.edit(date) },
+    ],
   };
 }
 

@@ -89,7 +89,10 @@ data/survey/drafts.json     half-finished check-ins, one per user and evening
 An entry is `{date, user, started_at, submitted_at, answers, notes, red_flags}`,
 serialised with `JSON.stringify` (a note with quotes or newlines cannot break the
 line). Submitting again for the same date rewrites that line instead of adding
-one. A skipped day has no line at all, so it is never recorded as a zero.
+one. A skipped day has no line at all, so it is never recorded as a zero. The
+confirmation keeps **Add notes** and **Edit tonight**: both rebuild that date's
+draft from the stored entry, so they still work after a restart, and a resubmit
+corrects the one line.
 
 `answers` has the eleven fields: `worst_pain`, `bloating`, `upper_gi`,
 `bowel_movements` (4 means "4 or more"), `bristol` (1-7 or `"none"`), `urgency`,

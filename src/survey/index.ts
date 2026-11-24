@@ -16,12 +16,13 @@ import {
   TextInputStyle,
 } from "discord.js";
 import { deliverDaily } from "./deliver.js";
-import { DraftStore } from "./drafts.js";
+import { type Draft, DraftStore } from "./drafts.js";
 import { isEnrolled, loadEnrollment } from "./enroll.js";
-import { buildEntry, type SurveyEntry } from "./entry.js";
+import { buildEntry, type SurveyNotes, type SurveyEntry } from "./entry.js";
 import { applyAnswer, fieldByKey, PAGE_COUNT } from "./fields.js";
 import {
   buildSurveyMessage,
+  confirmationRow,
   customIds,
   deletePrompt,
   formatDateLabel,
@@ -38,6 +39,7 @@ import { detectRedFlags, redFlagMessage } from "./redflags.js";
 import { DailyTimer } from "./schedule.js";
 import {
   deleteUserEntries,
+  findEntry,
   hasEntry,
   isPaused,
   monthKey,
@@ -60,7 +62,7 @@ const INTERACTION_DEADLINE_MS = 2_500;
 
 const EXPIRED_COPY = "This check-in message has expired — ask for a fresh one.";
 
-function notesModal(date: string): ModalBuilder {
+function notesModal(date: string, notes?: SurveyNotes): ModalBuilder {
   const other = new TextInputBuilder()
     .setCustomId(NOTES_OTHER_INPUT)
     .setLabel("Anything else (foods, timing, colour)")
@@ -74,6 +76,10 @@ function notesModal(date: string): ModalBuilder {
     .setStyle(TextInputStyle.Paragraph)
     .setRequired(false)
     .setMaxLength(1000);
+  // Add notes after Submit opens on what was stored, so correcting a note is
+  // editing it rather than typing it again.
+  if (notes?.other) other.setValue(notes.other);
+  if (notes?.red_flags_note) flags.setValue(notes.red_flags_note);
   return new ModalBuilder()
     .setCustomId(customIds.notesModal(date))
     .setTitle("Notes")
@@ -81,6 +87,25 @@ function notesModal(date: string): ModalBuilder {
       new ActionRowBuilder<TextInputBuilder>().addComponents(other),
       new ActionRowBuilder<TextInputBuilder>().addComponents(flags),
     );
+}
+
+/**
+ * The draft for an evening, rebuilt from the stored entry when memory has
+ * nothing: Submit drops the draft, and the confirmation's buttons (or a stale
+ * page click) then open the stored answers and notes as the draft. A resubmit
+ * replaces that date's line, as storage already does. Works across a restart,
+ * because the entry is on disk and not in this process.
+ */
+async function draftFor(userId: string, date: string): Promise<Draft> {
+  const existing = drafts.get(userId, date);
+  if (existing) return existing;
+  const stored = await findEntry(userId, date);
+  const draft = drafts.ensure(userId, date, stored?.started_at);
+  if (!stored) return draft;
+  draft.answers = { ...stored.answers };
+  draft.notes = { ...stored.notes };
+  await drafts.persist();
+  return draft;
 }
 
 /** How long Discord gives before a click can no longer be answered at all. */
@@ -178,7 +203,7 @@ export async function dispatch(interaction: Interaction, parsed: SurveyCustomId)
     case "field": {
       if (!interaction.isStringSelectMenu()) return;
       await interaction.deferUpdate();
-      const draft = drafts.ensure(interaction.user.id, parsed.date);
+      const draft = await draftFor(interaction.user.id, parsed.date);
       try {
         draft.answers = applyAnswer(draft.answers, parsed.field, interaction.values);
       } catch {
@@ -197,7 +222,7 @@ export async function dispatch(interaction: Interaction, parsed: SurveyCustomId)
     case "page": {
       if (!interaction.isButton()) return;
       await interaction.deferUpdate();
-      const draft = drafts.ensure(interaction.user.id, parsed.date);
+      const draft = await draftFor(interaction.user.id, parsed.date);
       draft.page = parsed.page;
       await drafts.persist();
       await interaction.editReply(buildSurveyMessage(draft.date, draft.answers, parsed.page));
@@ -206,8 +231,24 @@ export async function dispatch(interaction: Interaction, parsed: SurveyCustomId)
 
     case "notes": {
       if (!interaction.isButton()) return;
-      // showModal is the acknowledgement; keep it first.
-      await interaction.showModal(notesModal(parsed.date));
+      // showModal is the acknowledgement, but the modal must be sent already
+      // filled, so tonight's notes are resolved first. That is the draft when
+      // one is open and the stored entry after Submit, both local reads; the
+      // notes themselves come back on the modal, so no message edit is needed.
+      const draft = await draftFor(interaction.user.id, parsed.date);
+      await interaction.showModal(notesModal(parsed.date, draft.notes));
+      return;
+    }
+
+    case "edit": {
+      if (!interaction.isButton()) return;
+      // Edit tonight reopens page one on tonight's entry; every page after it
+      // shows those stored answers, so Submit replaces the one line.
+      await interaction.deferUpdate();
+      const draft = await draftFor(interaction.user.id, parsed.date);
+      draft.page = 1;
+      await drafts.persist();
+      await interaction.editReply(buildSurveyMessage(draft.date, draft.answers, 1));
       return;
     }
 
@@ -233,15 +274,27 @@ export async function dispatch(interaction: Interaction, parsed: SurveyCustomId)
 
     case "submit": {
       if (!interaction.isButton()) return;
-      // The draft is in memory (loaded at startup), so this costs no I/O: it
-      // only picks between an ephemeral nudge and an update of the message.
-      const draft = drafts.ensure(interaction.user.id, parsed.date);
-      const missing = missingFieldsNotice(draft.answers);
-      if (missing) {
-        await interaction.reply({ content: missing, flags: MessageFlags.Ephemeral });
-        return;
+      // Normally the draft is in memory (loaded at startup), so the blank check
+      // costs no I/O and a missing answer is named before anything is deferred.
+      // A Submit that follows a confirmation click has no draft: the answers
+      // come from the stored entry, which is read after the acknowledgement.
+      const cached = drafts.get(interaction.user.id, parsed.date);
+      if (cached) {
+        const missing = missingFieldsNotice(cached.answers);
+        if (missing) {
+          await interaction.reply({ content: missing, flags: MessageFlags.Ephemeral });
+          return;
+        }
       }
       await interaction.deferUpdate();
+      const draft = cached ?? (await draftFor(interaction.user.id, parsed.date));
+      if (!cached) {
+        const missing = missingFieldsNotice(draft.answers);
+        if (missing) {
+          await interaction.followUp({ content: missing, flags: MessageFlags.Ephemeral });
+          return;
+        }
+      }
       const entry = buildEntry({
         userId: interaction.user.id,
         date: draft.date,
@@ -251,9 +304,11 @@ export async function dispatch(interaction: Interaction, parsed: SurveyCustomId)
       });
       const { action, monthCount } = await saveEntry(entry);
       await drafts.drop(entry.user, entry.date);
+      // Two ways back: the copy promises a resubmit corrects the line, so the
+      // message keeps a buttons row that rebuilds tonight's draft from the entry.
       await interaction.editReply({
         content: confirmationCopy(entry, action, monthCount),
-        components: [],
+        components: [confirmationRow(entry.date)],
       });
       return;
     }
@@ -318,7 +373,7 @@ function confirmationCopy(
   const lines = [
     `✅ ${when} for ${formatDateLabel(entry.date)}.`,
     `That is ${monthCount} ${monthCount === 1 ? "entry" : "entries"} in ${monthKey(entry.date)}.`,
-    "Submitting again tonight corrects it rather than adding a second one.",
+    "**Edit tonight** changes an answer, and submitting again corrects this one line rather than adding a second. **Add notes** adds anything else.",
   ];
   const flags = redFlagMessage(entry.red_flags);
   if (flags) lines.push(flags);

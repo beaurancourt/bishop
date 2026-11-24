@@ -134,6 +134,20 @@ export async function hasEntry(userId: string, date: string, dir?: string): Prom
   return entries.some((entry) => entry.user === userId && entry.date === date);
 }
 
+/**
+ * The entry this user already wrote for `date`, if there is one. The
+ * confirmation's buttons rebuild the draft from it, so editing after Submit
+ * works without anything held in memory.
+ */
+export async function findEntry(
+  userId: string,
+  date: string,
+  dir?: string,
+): Promise<SurveyEntry | undefined> {
+  const entries = await readMonth(monthKey(date), dir);
+  return entries.find((entry) => entry.user === userId && entry.date === date);
+}
+
 /** Every month file currently on disk, newest first. */
 export async function listMonths(dir?: string): Promise<string[]> {
   try {
