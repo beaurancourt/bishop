@@ -59,6 +59,9 @@ FIELD_COLUMNS: list[tuple[str, str]] = [
     ("reflux_triggers", "reflux_triggers"),
     ("lay_down_after_eating", "lay_down_after_eating"),
     ("portion_size", "portion_size"),
+    # The fatigue grade and the anaemia signs; older lines export blank cells.
+    ("fatigue", "fatigue"),
+    ("anaemia_signs", "anaemia_signs"),
 ]
 LIST_FIELDS = {
     "foods_fodmap",
@@ -67,6 +70,7 @@ LIST_FIELDS = {
     "meals",
     "other_symptoms",
     "reflux_triggers",
+    "anaemia_signs",
 }
 
 # The daily set's own order, used to lay out the diet counters.
@@ -76,6 +80,13 @@ LAST_MEAL_ORDER = ["more than 3 h", "2–3 h", "within 2 h", "did not eat"]
 REFLUX_TRIGGER_ORDER = ["mint", "citrus", "tomato"]
 LAY_DOWN_ORDER = ["yes", "no"]
 PORTION_ORDER = ["small", "medium", "large"]
+FATIGUE_ORDER = ["none", "mild", "moderate", "severe", "bed-bound"]
+ANAEMIA_SIGN_ORDER = [
+    "pale",
+    "breathless on exertion",
+    "palpitations",
+    "dizzy on standing",
+]
 
 # Display order and labels for the rows of the food table, one group per list.
 # These are the stored values of the two menus, so a CSV cell and a summary row
@@ -432,6 +443,36 @@ def write_markdown(entries: list[dict], month: date, stream) -> None:
     if bm_values:
         write(f"- Bowel movements per day: median {statistics.median(bm_values):g} (n={len(bm_values)})\n")
     write("\n")
+
+    # --- fatigue and anaemia signs -------------------------------------------
+    # The pair added after the reflux fields: a fatigue grade for trend, and the
+    # signs that point at iron loss. A blank cell is a day the field was not
+    # asked, never a zero.
+    fatigue = value_counter(entries, "fatigue")
+    anaemia_signs, sign_days = list_counter(entries, "anaemia_signs")
+    two_or_more = 0
+    for entry in entries:
+        signs = entry.get("answers", {}).get("anaemia_signs")
+        if not isinstance(signs, list):
+            continue
+        if len([str(item) for item in signs if str(item) != "none"]) >= 2:
+            two_or_more += 1
+    sign_values = ", ".join(
+        f"{value} {anaemia_signs[value]}" for value in ANAEMIA_SIGN_ORDER if anaemia_signs[value]
+    )
+
+    write("## Fatigue and anaemia signs\n\n")
+    write(f"- Fatigue: {bucket_days(fatigue, FATIGUE_ORDER)}\n")
+    write(
+        "- Anaemia signs: "
+        + (sign_values if sign_values else "none recorded")
+        + (f" (of {sign_days} days with an answer)" if sign_days else "")
+        + f"; two or more on {two_or_more} {'day' if two_or_more == 1 else 'days'}\n"
+    )
+    write(
+        "\nTwo or more signs on a day is what the check-in's confirmation pointed at a blood "
+        "test for. It is a prompt, not a finding.\n\n"
+    )
 
     # --- stool and upper GI --------------------------------------------------
     bristol = Counter(str(value) for value in field_values("bristol") if value is not None)

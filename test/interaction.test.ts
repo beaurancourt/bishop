@@ -40,6 +40,8 @@ function fullAnswers(): Answers {
     reflux_triggers: ["none"],
     lay_down_after_eating: "no",
     portion_size: "medium",
+    fatigue: "moderate",
+    anaemia_signs: ["none"],
   };
 }
 
@@ -299,10 +301,64 @@ test("the symptom answers round-trip into the submitted entry", async (t) => {
   const stored = JSON.parse((await monthLines(dir))[0]) as { answers: Answers };
   assert.equal(stored.answers.pain_location, "upper right");
   assert.deepEqual(stored.answers.other_symptoms, ["nausea", "cold sweats"]);
-  // The twenty-two-fast-path entry keeps every earlier id and value.
+  // The twenty-four-fast-path entry keeps every earlier id and value.
   assert.equal(stored.answers.worst_pain, 7);
   assert.deepEqual(stored.answers.foods_fodmap, ["dairy"]);
   assert.equal(stored.answers.last_meal, "2–3 h");
+});
+
+test("the fatigue grade and the anaemia signs round-trip into the submitted entry", async (t) => {
+  const dir = await workspace(t);
+  process.env.SURVEY_USER_IDS = USER;
+  const draft = drafts.ensure(USER, DATE, STARTED_AT);
+  draft.answers = {
+    ...fullAnswers(),
+    fatigue: "severe",
+    anaemia_signs: ["pale", "dizzy on standing"],
+  };
+  await drafts.persist();
+
+  const click = fakeInteraction({ customId: `survey:${DATE}:submit`, isButton: true });
+  await handleInteraction(click.interaction);
+
+  const entry = JSON.parse((await monthLines(dir))[0]) as {
+    answers: Answers;
+    red_flags: string[];
+  };
+  assert.equal(entry.answers.fatigue, "severe");
+  assert.deepEqual(entry.answers.anaemia_signs, ["pale", "dizzy on standing"]);
+  // The earlier ids and values are untouched beside the new pair.
+  assert.equal(entry.answers.worst_pain, 7);
+  assert.deepEqual(entry.answers.foods_fodmap, ["dairy"]);
+  assert.equal(entry.answers.portion_size, "medium");
+  // The signs are an answer, not a stored flag.
+  assert.deepEqual(entry.red_flags, []);
+});
+
+test("two anaemia signs add one sentence about a blood test, never a flag", async (t) => {
+  const dir = await workspace(t);
+  process.env.SURVEY_USER_IDS = USER;
+
+  const submit = async (signs: string[]) => {
+    const draft = drafts.ensure(USER, DATE, STARTED_AT);
+    draft.answers = { ...fullAnswers(), anaemia_signs: signs };
+    await drafts.persist();
+    const click = fakeInteraction({ customId: `survey:${DATE}:submit`, isButton: true });
+    await handleInteraction(click.interaction);
+    return { content: String(click.edits.at(-1)?.content), stored: (await monthLines(dir))[0] };
+  };
+
+  const two = await submit(["pale", "palpitations"]);
+  assert.match(two.content, /blood test/);
+  assert.deepEqual(
+    (JSON.parse(two.stored) as { red_flags: string[] }).red_flags,
+    [],
+    "the sentence is copy, not a stored flag",
+  );
+
+  // One sign, and a day answered "none", say nothing extra.
+  assert.doesNotMatch((await submit(["pale"])).content, /blood test/);
+  assert.doesNotMatch((await submit(["none"])).content, /blood test/);
 });
 
 test("a restart between the prompt and Next keeps the earlier answers", async (t) => {
@@ -325,7 +381,7 @@ test("a restart between the prompt and Next keeps the earlier answers", async (t
   await handleInteraction(next.interaction);
 
   assert.deepEqual(next.events, ["deferUpdate", "editReply"]);
-  assert.match(String(next.edits.at(-1)?.content), /answered 1 of 22/);
+  assert.match(String(next.edits.at(-1)?.content), /answered 1 of 24/);
 });
 
 test("a select menu answer is acknowledged before it is stored", async (t) => {
@@ -344,7 +400,7 @@ test("a select menu answer is acknowledged before it is stored", async (t) => {
 
   assert.deepEqual(click.events, ["deferUpdate", "editReply"]);
   assert.equal(fileAtAck, false);
-  assert.match(String(click.edits.at(-1)?.content), /answered 1 of 22/);
+  assert.match(String(click.edits.at(-1)?.content), /answered 1 of 24/);
   assert.equal(drafts.get(USER, DATE)?.answers.worst_pain, 7);
   assert.equal(existsSync(join(dir, "drafts.json")), true);
 });
@@ -375,7 +431,7 @@ test("the confirmation keeps Add notes and Edit tonight, and a resubmit replaces
   const edit = fakeInteraction({ customId: `survey:${DATE}:edit`, isButton: true });
   await handleInteraction(edit.interaction);
   assert.match(String(edit.edits.at(-1)?.content), /Page 1 of 6/);
-  assert.match(String(edit.edits.at(-1)?.content), /answered 22 of 22/);
+  assert.match(String(edit.edits.at(-1)?.content), /answered 24 of 24/);
   assert.equal(drafts.get(USER, DATE)?.answers.worst_pain, 7, "the stored answers came back");
 
   // One answer changes, then Submit again.
@@ -474,7 +530,7 @@ test("a restart between Submit and the confirmation buttons does not break them"
   const edit = fakeInteraction({ customId: `survey:${DATE}:edit`, isButton: true });
   await handleInteraction(edit.interaction);
   assert.match(String(edit.edits.at(-1)?.content), /Page 1 of 6/);
-  assert.match(String(edit.edits.at(-1)?.content), /answered 22 of 22/);
+  assert.match(String(edit.edits.at(-1)?.content), /answered 24 of 24/);
   assert.equal(drafts.get(USER, DATE)?.answers.bloating, 3);
 
   const again = fakeInteraction({ customId: `survey:${DATE}:submit`, isButton: true });

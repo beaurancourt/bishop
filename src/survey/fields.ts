@@ -1,5 +1,5 @@
 /**
- * The twenty-two fast-path fields of the daily gut check-in, and the one place
+ * The twenty-four fast-path fields of the daily gut check-in, and the one place
  * that knows how a select-menu value becomes a stored answer.
  *
  * The shape here is the storage shape: `answers` is keyed by `FieldKey`, and a
@@ -47,7 +47,9 @@ export type FieldKey =
   | "spicy"
   | "reflux_triggers"
   | "lay_down_after_eating"
-  | "portion_size";
+  | "portion_size"
+  | "fatigue"
+  | "anaemia_signs";
 
 export type FieldKind = "scale" | "enum" | "bristol" | "multi";
 
@@ -192,6 +194,34 @@ export const LAY_DOWN_OPTIONS: FieldOption[] = enumOptions("yes", "no");
 export const PORTION_OPTIONS: FieldOption[] = enumOptions("small", "medium", "large");
 
 /**
+ * Fatigue is a grade, not a number: "bed-bound" is a different kind of day from
+ * "severe", and the export groups days by these words. The spec's list is in
+ * this order, worst last.
+ */
+export const FATIGUE_OPTIONS: FieldOption[] = enumOptions(
+  "none",
+  "mild",
+  "moderate",
+  "severe",
+  "bed-bound",
+);
+
+/**
+ * The signs that point at iron loss, as a clinic words them. They are asked
+ * beside fatigue because tiredness alone is too vague to trend; two of these on
+ * one day is what the confirmation mentions a blood test for. Nothing here is a
+ * stored red flag: "known anaemia" already lives on the red-flag list, and a
+ * diary does not diagnose.
+ */
+export const ANAEMIA_SIGN_OPTIONS: FieldOption[] = enumOptions(
+  "pale",
+  "breathless on exertion",
+  "palpitations",
+  "dizzy on standing",
+  NONE,
+);
+
+/**
  * Where the pain sat, in the words a clinic uses. The quadrant matters: right
  * upper points at the gallbladder, epigastric at gastritis, right lower at the
  * appendix, left lower at the colon.
@@ -225,14 +255,15 @@ export const SYMPTOM_OPTIONS: FieldOption[] = enumOptions(
  * Page 2: where the pain was, the symptom list, and gut behaviour.
  * Page 3: the night question, stress, and the two food lists side by side.
  * Page 4: medication, sleep, the meals, and caffeine servings.
- * Page 5: alcohol, the last meal, and spicy or acidic food.
+ * Page 5: alcohol, the last meal, fatigue, and the anaemia signs.
  * Page 6: the reflux side — the triggers that are not foods, lying down after
- * eating, and portion size.
+ * eating, portion size — and spicy or acidic food.
  *
  * Discord allows five action rows per message and one component per row for a
  * select menu, so a page carries at most four menus plus its button row. The
- * twenty-two fields therefore need six pages; `PAGE_COUNT` follows the
- * assignments below, and a test asserts the row budget for every page.
+ * twenty-four fields therefore need exactly six pages at four a page, which is
+ * the minimum; `PAGE_COUNT` follows the assignments below, and a test asserts
+ * the row budget for every page.
  */
 export const FIELDS: FieldDef[] = [
   {
@@ -386,12 +417,20 @@ export const FIELDS: FieldDef[] = [
     options: LAST_MEAL_OPTIONS,
   },
   {
-    key: "spicy",
-    prompt: "Spicy or acidic food",
-    placeholder: "spicy or acidic food",
+    key: "fatigue",
+    prompt: "Fatigue today",
+    placeholder: "fatigue",
     kind: "enum",
     page: 5,
-    options: enumOptions("yes", "no"),
+    options: FATIGUE_OPTIONS,
+  },
+  {
+    key: "anaemia_signs",
+    prompt: "Anaemia signs today (choose any)",
+    placeholder: "anaemia signs",
+    kind: "multi",
+    page: 5,
+    options: ANAEMIA_SIGN_OPTIONS,
   },
   {
     key: "reflux_triggers",
@@ -416,6 +455,14 @@ export const FIELDS: FieldDef[] = [
     kind: "enum",
     page: 6,
     options: PORTION_OPTIONS,
+  },
+  {
+    key: "spicy",
+    prompt: "Spicy or acidic food",
+    placeholder: "spicy or acidic food",
+    kind: "enum",
+    page: 6,
+    options: enumOptions("yes", "no"),
   },
 ];
 
@@ -535,3 +582,21 @@ export function selectedValues(field: FieldDef, value: AnswerValue | undefined):
   if (Array.isArray(value)) return value;
   return [String(value)];
 }
+
+/**
+ * How many distinct anaemia signs a day recorded; `none` counts as none, so a
+ * line written before the field existed also scores zero.
+ */
+export function anaemiaSignCount(value: AnswerValue | undefined): number {
+  if (!Array.isArray(value)) return 0;
+  return value.filter((item) => item !== NONE).length;
+}
+
+/**
+ * The one sentence the confirmation adds when a day recorded two or more
+ * anaemia signs. It is copy, not a stored flag: nothing is written to
+ * `red_flags`, and the existing red-flag prose still owns "known anaemia". The
+ * sentence says what to do, not what the signs mean, because a diary cannot.
+ */
+export const ANAEMIA_SIGNS_COPY =
+  "You recorded two or more anaemia signs today. Repeated anaemia signs are worth a blood test — mention them to your doctor.";

@@ -5,6 +5,7 @@ import {
   FIELDS,
   FIELD_KEYS,
   PAGE_COUNT,
+  anaemiaSignCount,
   applyAnswer,
   fieldByKey,
   fieldsOnPage,
@@ -44,17 +45,19 @@ function componentsOf(message: ReturnType<typeof buildSurveyMessage>): RawCompon
 const rowsOf = (message: ReturnType<typeof buildSurveyMessage>) =>
   message.components as unknown as RawComponent[];
 
-test("the twenty-two fast-path fields are all present and none is repeated", () => {
-  assert.equal(FIELDS.length, 22);
-  assert.equal(new Set(FIELD_KEYS).size, 22);
+test("the twenty-four fast-path fields are all present and none is repeated", () => {
+  assert.equal(FIELDS.length, 24);
+  assert.equal(new Set(FIELD_KEYS).size, 24);
   assert.deepEqual(
     [...FIELD_KEYS].sort(),
     [
       "alcohol",
+      "anaemia_signs",
       "bloating",
       "bowel_movements",
       "bristol",
       "caffeine",
+      "fatigue",
       "foods_fodmap",
       "foods_other",
       "last_meal",
@@ -94,7 +97,7 @@ test("every page fits Discord's five action rows and five components per row", (
     }
     for (const field of fields) seen.add(field.key);
   }
-  assert.equal(seen.size, 22);
+  assert.equal(seen.size, 24);
 });
 
 test("each select's custom id carries the date and the field, and parses back", () => {
@@ -258,15 +261,17 @@ test("the diet questions store exactly the spec's answer values", () => {
   assert.equal(answers.last_meal, "2–3 h");
   assert.equal(answers.spicy, "yes");
 
-  // They are spread over pages four and five, inside the row budget.
+  // They are spread over pages four to six, inside the row budget.
   for (const key of ["meals", "caffeine"]) {
     assert.equal(FIELDS.find((field) => field.key === key)?.page, 4);
   }
-  for (const key of ["alcohol", "last_meal", "spicy"]) {
+  for (const key of ["alcohol", "last_meal"]) {
     assert.equal(FIELDS.find((field) => field.key === key)?.page, 5);
   }
+  // Spicy moved to the last page when the anaemia pair took its place on five.
+  assert.equal(FIELDS.find((field) => field.key === "spicy")?.page, 6);
   // The counter copy reports the new total, not the old eighteen.
-  assert.match(buildSurveyMessage(DATE, {}, 1).content, /answered 0 of 22/);
+  assert.match(buildSurveyMessage(DATE, {}, 1).content, /answered 0 of 24/);
 });
 
 test("the reflux fields store the spec's values and round-trip onto page six", () => {
@@ -299,12 +304,65 @@ test("the reflux fields store the spec's values and round-trip onto page six", (
   assert.deepEqual(selected("lay_down_after_eating"), ["yes"]);
   assert.deepEqual(selected("portion_size"), ["large"]);
 
-  // The three sit together on page six, inside the four-select, five-row budget.
+  // The reflux fields and spicy now share the last page, inside the
+  // four-select, five-row budget.
   for (const key of ["reflux_triggers", "lay_down_after_eating", "portion_size"]) {
     assert.equal(fieldByKey(key)?.page, 6);
   }
-  assert.equal(fieldsOnPage(6).length, 3);
-  assert.equal(rowsOf(page).length, 4);
+  assert.deepEqual(
+    fieldsOnPage(6).map((field) => field.key),
+    ["reflux_triggers", "lay_down_after_eating", "portion_size", "spicy"],
+  );
+  assert.equal(fieldsOnPage(6).length, 4);
+  assert.equal(rowsOf(buildSurveyMessage(DATE, {}, 6)).length, 5);
+});
+
+test("the fatigue grade and the anaemia signs round-trip onto page five", () => {
+  const values = (key: string) => fieldByKey(key)?.options.map((option) => option.value);
+  assert.deepEqual(values("fatigue"), ["none", "mild", "moderate", "severe", "bed-bound"]);
+  assert.deepEqual(values("anaemia_signs"), [
+    "pale",
+    "breathless on exertion",
+    "palpitations",
+    "dizzy on standing",
+    "none",
+  ]);
+  assert.equal(fieldByKey("fatigue")?.kind, "enum");
+  assert.equal(fieldByKey("anaemia_signs")?.kind, "multi");
+
+  let answers = applyAnswer({}, "fatigue", ["bed-bound"]);
+  answers = applyAnswer(answers, "anaemia_signs", ["pale", "dizzy on standing"]);
+  assert.equal(answers.fatigue, "bed-bound");
+  assert.deepEqual(answers.anaemia_signs, ["pale", "dizzy on standing"]);
+  // "none" never coexists with a real sign, exactly as the other lists behave.
+  answers = applyAnswer(answers, "anaemia_signs", ["none", "palpitations"]);
+  assert.deepEqual(answers.anaemia_signs, ["palpitations"]);
+  answers = applyAnswer(answers, "anaemia_signs", ["none"]);
+  assert.deepEqual(answers.anaemia_signs, ["none"]);
+
+  const page = buildSurveyMessage(DATE, answers, 5);
+  const selected = (key: string) =>
+    (componentsOf(page)
+      .find((component) => component.custom_id === customIds.field(DATE, key))
+      ?.options ?? [])
+      .filter((option) => option.default)
+      .map((option) => option.value);
+  assert.deepEqual(selected("fatigue"), ["bed-bound"]);
+  assert.deepEqual(selected("anaemia_signs"), ["none"]);
+
+  // The pair share page five with alcohol and the last meal: four selects and
+  // the button row, which is Discord's five-row limit exactly.
+  assert.deepEqual(
+    fieldsOnPage(5).map((field) => field.key),
+    ["alcohol", "last_meal", "fatigue", "anaemia_signs"],
+  );
+  assert.equal(rowsOf(page).length, 5);
+
+  // "none" and no answer both count as zero signs; two real signs do not.
+  assert.equal(anaemiaSignCount(undefined), 0);
+  assert.equal(anaemiaSignCount(["none"]), 0);
+  assert.equal(anaemiaSignCount(["pale"]), 1);
+  assert.equal(anaemiaSignCount(["pale", "palpitations"]), 2);
 });
 
 test("the symptom fields store exactly the spec's answer values", () => {
@@ -414,7 +472,7 @@ test("the food question is two lists, split by the spec's groups", () => {
 
 test("a submission missing fields is named, not written", () => {
   const answers = applyAnswer({}, "worst_pain", ["3"]);
-  assert.equal(missingFields(answers).length, 21);
+  assert.equal(missingFields(answers).length, 23);
   const notice = missingFieldsNotice(answers);
   assert.ok(notice?.includes("Bloating"));
   assert.ok(!notice?.includes("Worst abdominal pain"));

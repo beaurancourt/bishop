@@ -21,6 +21,8 @@ import { type Draft, DraftStore } from "./drafts.js";
 import { isEnrolled, loadEnrollment } from "./enroll.js";
 import { buildEntry, type SurveyNotes, type SurveyEntry } from "./entry.js";
 import {
+  ANAEMIA_SIGNS_COPY,
+  anaemiaSignCount,
   applyAnswer,
   type FieldDef,
   fieldByKey,
@@ -498,6 +500,9 @@ function confirmationCopy(
   if (entry.notes.other_foods) lines.push(`${otherLabel("other_foods")}: ${entry.notes.other_foods}`);
   const flags = redFlagMessage(entry.red_flags);
   if (flags) lines.push(flags);
+  // Two anaemia signs are a nudge, not a flag: the sentence rides on the
+  // confirmation and is never written to `red_flags`.
+  if (anaemiaSignCount(entry.answers.anaemia_signs) >= 2) lines.push(ANAEMIA_SIGNS_COPY);
   return lines.join("\n\n");
 }
 
