@@ -16,9 +16,10 @@ import {
   TextInputStyle,
 } from "discord.js";
 import { deliverDaily } from "./deliver.js";
+import { DraftStore } from "./drafts.js";
 import { isEnrolled, loadEnrollment } from "./enroll.js";
-import { buildEntry, type SurveyEntry, type SurveyNotes } from "./entry.js";
-import { type Answers, applyAnswer, fieldByKey, PAGE_COUNT } from "./fields.js";
+import { buildEntry, type SurveyEntry } from "./entry.js";
+import { applyAnswer, fieldByKey, PAGE_COUNT } from "./fields.js";
 import {
   buildSurveyMessage,
   customIds,
@@ -46,46 +47,18 @@ import {
 } from "./storage.js";
 import { isoDateInZone, parseAt, SURVEY_TIME_ZONE } from "./time.js";
 
-interface Draft {
-  userId: string;
-  date: string;
-  startedAt: string;
-  answers: Answers;
-  notes: SurveyNotes;
-  page: number;
-}
-
 /**
- * In-memory drafts, keyed `userId|date`. A restart loses half-finished pages,
- * not saved entries: the entry is written on Submit, and an interaction after a
- * restart recreates the draft from that click onward.
+ * Half-finished check-ins, keyed `userId|date`, written through to
+ * `data/survey/drafts.json` on every change and read back at startup. A restart
+ * between two pages hands the next click the answers from the earlier pages; an
+ * entry is still only written on Submit.
  */
-const drafts = new Map<string, Draft>();
+export const drafts = new DraftStore();
 
-const draftKey = (userId: string, date: string): string => `${userId}|${date}`;
+/** Discord's callback window is three seconds; leave the network some room. */
+const INTERACTION_DEADLINE_MS = 2_500;
 
-function draftFor(userId: string, date: string, startedAt?: string): Draft {
-  const key = draftKey(userId, date);
-  const existing = drafts.get(key);
-  if (existing) return existing;
-  const fresh: Draft = {
-    userId,
-    date,
-    startedAt: startedAt ?? new Date().toISOString(),
-    answers: {},
-    notes: { other: "", red_flags_note: "" },
-    page: 1,
-  };
-  drafts.set(key, fresh);
-  return fresh;
-}
-
-/** Drops yesterday's half-finished pages when a new evening starts. */
-function pruneDrafts(date: string): void {
-  for (const [key, draft] of drafts) {
-    if (draft.date !== date) drafts.delete(key);
-  }
-}
+const EXPIRED_COPY = "This check-in message has expired — ask for a fresh one.";
 
 function notesModal(date: string): ModalBuilder {
   const other = new TextInputBuilder()
@@ -110,7 +83,27 @@ function notesModal(date: string): ModalBuilder {
     );
 }
 
-async function handleInteraction(interaction: Interaction): Promise<void> {
+/** How long Discord gives before a click can no longer be answered at all. */
+function isExpired(interaction: Interaction): boolean {
+  const age = Date.now() - interaction.createdTimestamp;
+  return Number.isFinite(age) && age > INTERACTION_DEADLINE_MS;
+}
+
+/**
+ * Tells her the message is too old to answer. The reply itself may fail with the
+ * same 10062 — an expired token rejects everything — so it is never allowed to
+ * throw: the point is a sentence, not a stack trace.
+ */
+async function apologiseForExpiry(interaction: Interaction): Promise<void> {
+  if (!interaction.isRepliable()) return;
+  await interaction
+    .reply({ content: EXPIRED_COPY, flags: MessageFlags.Ephemeral })
+    .catch((err) => {
+      console.warn(`survey: could not answer an expired interaction (${String(err)})`);
+    });
+}
+
+export async function handleInteraction(interaction: Interaction): Promise<void> {
   const customId = "customId" in interaction ? interaction.customId : undefined;
   if (!customId) return;
   const parsed = parseCustomId(customId);
@@ -126,6 +119,14 @@ async function handleInteraction(interaction: Interaction): Promise<void> {
     return;
   }
 
+  // A late event — a reconnect, a busy box — is past the three-second window
+  // before this process sees it, and every callback would answer 10062. Say the
+  // sentence instead, and do not run the work.
+  if (isExpired(interaction)) {
+    await apologiseForExpiry(interaction);
+    return;
+  }
+
   const enrolled = await loadEnrollment();
   if (!isEnrolled(interaction.user.id, enrolled)) {
     if (interaction.isRepliable()) {
@@ -137,11 +138,24 @@ async function handleInteraction(interaction: Interaction): Promise<void> {
     return;
   }
 
+  // One read of drafts.json for the life of the process; a no-op after startup.
+  await drafts.load();
+
   try {
     await dispatch(interaction, parsed);
   } catch (err) {
     console.error("survey: interaction failed", err);
-    if (interaction.isRepliable() && !interaction.replied && !interaction.deferred) {
+    if (!interaction.isRepliable()) return;
+    if (interaction.deferred) {
+      // A deferred component update keeps the check-in message standing, so the
+      // apology goes beside it rather than replacing it.
+      await interaction
+        .followUp({
+          content: "Something went wrong saving that. Please try it again.",
+          flags: MessageFlags.Ephemeral,
+        })
+        .catch(() => undefined);
+    } else if (!interaction.replied) {
       await interaction
         .reply({
           content: "Something went wrong saving that. Please try it again.",
@@ -152,47 +166,60 @@ async function handleInteraction(interaction: Interaction): Promise<void> {
   }
 }
 
-async function dispatch(interaction: Interaction, parsed: SurveyCustomId): Promise<void> {
+/**
+ * The acknowledgement rule: every component is acknowledged first, with
+ * `deferUpdate` when the message itself will be edited and `deferReply` when the
+ * answer is a new ephemeral message. The notes button is the exception —
+ * `showModal` is its acknowledgement. Nothing slow (a file write, an API call
+ * for someone else) happens before the ack.
+ */
+export async function dispatch(interaction: Interaction, parsed: SurveyCustomId): Promise<void> {
   switch (parsed.kind) {
     case "field": {
       if (!interaction.isStringSelectMenu()) return;
-      const draft = draftFor(interaction.user.id, parsed.date);
+      await interaction.deferUpdate();
+      const draft = drafts.ensure(interaction.user.id, parsed.date);
       try {
         draft.answers = applyAnswer(draft.answers, parsed.field, interaction.values);
       } catch {
-        await interaction.reply({
+        await interaction.followUp({
           content: "That answer could not be read. Please pick it again.",
           flags: MessageFlags.Ephemeral,
         });
         return;
       }
       draft.page = fieldByKey(parsed.field)?.page ?? draft.page;
-      await interaction.update(buildSurveyMessage(draft.date, draft.answers, draft.page));
+      await drafts.persist();
+      await interaction.editReply(buildSurveyMessage(draft.date, draft.answers, draft.page));
       return;
     }
 
     case "page": {
       if (!interaction.isButton()) return;
-      const draft = draftFor(interaction.user.id, parsed.date);
+      await interaction.deferUpdate();
+      const draft = drafts.ensure(interaction.user.id, parsed.date);
       draft.page = parsed.page;
-      await interaction.update(buildSurveyMessage(draft.date, draft.answers, parsed.page));
+      await drafts.persist();
+      await interaction.editReply(buildSurveyMessage(draft.date, draft.answers, parsed.page));
       return;
     }
 
     case "notes": {
       if (!interaction.isButton()) return;
+      // showModal is the acknowledgement; keep it first.
       await interaction.showModal(notesModal(parsed.date));
       return;
     }
 
     case "notes-modal": {
       if (!interaction.isModalSubmit()) return;
-      const draft = draftFor(interaction.user.id, parsed.date);
+      const draft = drafts.ensure(interaction.user.id, parsed.date);
       draft.notes = {
         other: interaction.fields.getTextInputValue(NOTES_OTHER_INPUT).trim(),
         red_flags_note: interaction.fields.getTextInputValue(NOTES_FLAGS_INPUT).trim(),
       };
       draft.page = PAGE_COUNT;
+      await drafts.persist();
       const fired = redFlagMessage(detectRedFlags(draft.notes.red_flags_note));
       await interaction.reply({
         content: ["Notes saved.", fired, "Press **Submit** to write tonight's entry."]
@@ -206,12 +233,15 @@ async function dispatch(interaction: Interaction, parsed: SurveyCustomId): Promi
 
     case "submit": {
       if (!interaction.isButton()) return;
-      const draft = draftFor(interaction.user.id, parsed.date);
+      // The draft is in memory (loaded at startup), so this costs no I/O: it
+      // only picks between an ephemeral nudge and an update of the message.
+      const draft = drafts.ensure(interaction.user.id, parsed.date);
       const missing = missingFieldsNotice(draft.answers);
       if (missing) {
         await interaction.reply({ content: missing, flags: MessageFlags.Ephemeral });
         return;
       }
+      await interaction.deferUpdate();
       const entry = buildEntry({
         userId: interaction.user.id,
         date: draft.date,
@@ -220,8 +250,8 @@ async function dispatch(interaction: Interaction, parsed: SurveyCustomId): Promi
         notes: draft.notes,
       });
       const { action, monthCount } = await saveEntry(entry);
-      drafts.delete(draftKey(entry.user, entry.date));
-      await interaction.update({
+      await drafts.drop(entry.user, entry.date);
+      await interaction.editReply({
         content: confirmationCopy(entry, action, monthCount),
         components: [],
       });
@@ -230,36 +260,42 @@ async function dispatch(interaction: Interaction, parsed: SurveyCustomId): Promi
 
     case "pause": {
       if (!interaction.isButton()) return;
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       await patchUserState(interaction.user.id, { paused_at: new Date().toISOString() });
-      await interaction.reply({ ...resumeButton(), flags: MessageFlags.Ephemeral });
+      await interaction.editReply(resumeButton());
       return;
     }
 
     case "resume": {
       if (!interaction.isButton()) return;
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       await patchUserState(interaction.user.id, { paused_at: null });
-      await interaction.reply({
+      await interaction.editReply({
         content: "Resumed. The next check-in arrives at the usual evening time.",
-        flags: MessageFlags.Ephemeral,
       });
       return;
     }
 
     case "delete": {
       if (!interaction.isButton()) return;
-      await interaction.reply({ ...deletePrompt(), flags: MessageFlags.Ephemeral });
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      await interaction.editReply(deletePrompt());
       return;
     }
 
     case "delete-confirm": {
       if (!interaction.isButton()) return;
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       const removed = await deleteUserEntries(interaction.user.id);
+      // A half-filled evening is her data too, and Delete my data says nothing
+      // is left behind.
+      await drafts.dropUser(interaction.user.id);
       // Cleared intro: if she comes back, the explanation comes first again.
       await patchUserState(interaction.user.id, {
         paused_at: new Date().toISOString(),
         intro_sent_at: undefined,
       });
-      await interaction.reply({
+      await interaction.editReply({
         content: [
           removed === 0
             ? "No entries were stored for this account, so there was nothing to delete."
@@ -267,7 +303,6 @@ async function dispatch(interaction: Interaction, parsed: SurveyCustomId): Promi
           "The nightly check-in is paused. Press **Resume** to start again.",
         ].join("\n\n"),
         components: resumeButton().components,
-        flags: MessageFlags.Ephemeral,
       });
       return;
     }
@@ -300,7 +335,7 @@ async function sendDaily(client: Client, options: { startedAt?: Date } = {}): Pr
   const now = options.startedAt ?? new Date();
   const date = isoDateInZone(now, timeZone);
   const enrolled = [...(await loadEnrollment())];
-  pruneDrafts(date);
+  await drafts.prune(date);
 
   const report = await deliverDaily({
     enrolled,
@@ -315,7 +350,9 @@ async function sendDaily(client: Client, options: { startedAt?: Date } = {}): Pr
       await patchUserState(userId, { intro_sent_at: new Date().toISOString() });
     },
     sendPrompt: async (userId, promptDate, startedAt) => {
-      draftFor(userId, promptDate, startedAt);
+      // The blank draft records when the evening began; keep it across restarts.
+      drafts.ensure(userId, promptDate, startedAt);
+      await drafts.persist();
       const dm = await openDm(client, userId);
       await dm.send(buildSurveyMessage(promptDate, {}, 1));
     },
@@ -333,6 +370,11 @@ async function sendDaily(client: Client, options: { startedAt?: Date } = {}): Pr
 }
 
 async function startScheduler(client: Client): Promise<void> {
+  // A restart resumes the evenings in progress; this is the only read. Pruning
+  // stays with the evening's own run (sendDaily), so a restart just after
+  // midnight cannot drop a draft from the evening that has only just ended.
+  await drafts.load();
+
   const timeZone = process.env.SURVEY_TIME_ZONE ?? SURVEY_TIME_ZONE;
   let at: { hour: number; minute: number };
   try {

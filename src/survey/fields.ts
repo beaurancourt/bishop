@@ -78,7 +78,10 @@ export const FOOD_OPTIONS: FieldOption[] = [
   { label: "onion/garlic", value: "onion/garlic" },
   { label: "legumes", value: "legumes" },
   { label: "apple/pear/stone fruit", value: "apple/pear/stone fruit" },
-  { label: "honey/HFCS/sorbitol", value: "honey/HFCS/sorbitol" },
+  {
+    label: "honey/high-fructose corn syrup/sorbitol",
+    value: "honey/HFCS/sorbitol",
+  },
   { label: "caffeine", value: "caffeine" },
   { label: "alcohol", value: "alcohol" },
   { label: "fried/fatty", value: "fried/fatty" },
@@ -87,7 +90,9 @@ export const FOOD_OPTIONS: FieldOption[] = [
 ];
 
 export const MEDICATION_OPTIONS: FieldOption[] = [
-  { label: "PPI", value: "PPI" },
+  // The label is for the person filling the form; the stored value is the
+  // abbreviation the exports and the clinic already use.
+  { label: "Proton pump inhibitor (omeprazole, etc.)", value: "PPI" },
   { label: "antacid", value: "antacid" },
   { label: "laxative", value: "laxative" },
   { label: "probiotic", value: "probiotic" },

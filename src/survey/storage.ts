@@ -6,6 +6,7 @@
  *
  *   data/survey/2026-11.jsonl   one entry per line, one file per month
  *   data/survey/state.json      intro sent, paused, nothing clinical
+ *   data/survey/drafts.json     half-filled evenings, in drafts.ts
  *
  * A second submission for the same date and user rewrites that one line, so a
  * corrected evening does not appear twice. Everything is written through

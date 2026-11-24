@@ -83,6 +83,7 @@ ignores):
 ```
 data/survey/2026-11.jsonl   one entry per line, one file per month
 data/survey/state.json      who has seen the intro, who is paused
+data/survey/drafts.json     half-finished check-ins, one per user and evening
 ```
 
 An entry is `{date, user, started_at, submitted_at, answers, notes, red_flags}`,
@@ -119,8 +120,14 @@ and that mean's denominator (`n`).
   wall-clock 21:00 in `America/New_York`, so a DST change moves the UTC instant,
   not the local hour. It never blocks the event loop: DM sends are awaited inside
   async callbacks, and one blocked DM does not stop the others.
-- Half-finished pages live in memory only. A restart loses an unfinished page,
-  never a submitted entry.
+- Every component click is acknowledged before any file or Discord work, so a
+  slow write cannot push the answer past Discord's three-second window. A click
+  that reaches the bot more than 2.5 seconds after it was made is answered with
+  "This check-in message has expired — ask for a fresh one" and changes nothing.
+- Half-finished pages are kept in `data/survey/drafts.json` and loaded at
+  startup, so a restart mid-evening hands the next click the answers from the
+  earlier pages. Drafts are pruned when their evening is no longer today, and
+  Submit removes the draft. Delete my data removes it too.
 - `SURVEY_SEND_ON_START=1` sends one check-in at startup without waiting for
   21:00, for a deployment smoke test.
 
