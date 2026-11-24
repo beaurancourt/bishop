@@ -36,7 +36,11 @@ FIELD_COLUMNS: list[tuple[str, str]] = [
     ("bristol", "bristol"),
     ("urgency", "urgency"),
     ("woke_at_night", "woke_at_night"),
-    ("foods", "foods"),
+    # The food question is two lists since it was split: high-FODMAP triggers and
+    # the other foods that matter. A line written before the split answers one
+    # `foods` list; its values are mapped into these columns, never dropped.
+    ("foods_fodmap", "foods_fodmap"),
+    ("foods_other", "foods_other"),
     ("medications", "medications"),
     ("stress", "stress"),
     ("sleep", "sleep"),
@@ -52,26 +56,66 @@ FIELD_COLUMNS: list[tuple[str, str]] = [
     ("pain_location", "pain_location"),
     ("other_symptoms", "other_symptoms"),
 ]
-LIST_FIELDS = {"foods", "medications", "meals", "other_symptoms"}
+LIST_FIELDS = {"foods_fodmap", "foods_other", "medications", "meals", "other_symptoms"}
 
 # The daily set's own order, used to lay out the diet counters.
 MEAL_ORDER = ["breakfast", "lunch", "dinner", "snacks"]
 SERVING_ORDER = ["0", "1", "2", "3+"]
 LAST_MEAL_ORDER = ["more than 3 h", "2–3 h", "within 2 h", "did not eat"]
 
-# Display order and labels for the rows of the food table.
-FOOD_GROUPS = [
+# Display order and labels for the rows of the food table, one group per list.
+# These are the stored values of the two menus, so a CSV cell and a summary row
+# name the same thing.
+FODMAP_FOOD_GROUPS = [
     "dairy",
     "wheat",
     "onion/garlic",
     "legumes",
-    "apple/pear/stone fruit",
+    "apple/pear",
+    "stone fruit",
     "honey/HFCS/sorbitol",
+    "mushroom",
+    "cauliflower/broccoli",
+    "avocado",
+    "mango/watermelon",
+    "rye/barley",
+]
+
+OTHER_FOOD_GROUPS = [
+    "chocolate",
+    "sweets/desserts",
+    "fried or fatty",
+    "lean or low-fat meals",
+    "carbonated",
     "caffeine",
     "alcohol",
-    "fried/fatty",
-    "carbonated",
+    "spicy",
+    "artificial sweeteners",
 ]
+
+# Storage key, the menu values in their order, and the label a reader sees.
+FOOD_LISTS: list[tuple[str, list[str], str]] = [
+    ("foods_fodmap", FODMAP_FOOD_GROUPS, "high-FODMAP"),
+    ("foods_other", OTHER_FOOD_GROUPS, "other"),
+]
+
+# The two lists of the single `foods` question that preceded the split, mapped
+# to the list that holds those foods now. Two of the old values changed wording
+# in the split ("apple/pear/stone fruit", "fried/fatty"); they stay readable
+# under their old label and are counted in the list they belong to, so a month
+# recorded before the split still shows up in the table.
+LEGACY_FOOD_LISTS = {
+    "dairy": "foods_fodmap",
+    "wheat": "foods_fodmap",
+    "onion/garlic": "foods_fodmap",
+    "legumes": "foods_fodmap",
+    "apple/pear/stone fruit": "foods_fodmap",
+    "honey/HFCS/sorbitol": "foods_fodmap",
+    "caffeine": "foods_other",
+    "alcohol": "foods_other",
+    "fried/fatty": "foods_other",
+    "carbonated": "foods_other",
+}
 
 # Mirrors src/survey/redflags.ts: keys are stored, these are read by a person.
 RED_FLAG_LABELS = {
@@ -146,7 +190,35 @@ def load_entries(month: date, data_dir: Path) -> list[dict]:
     return entries
 
 
+FOOD_KEYS = {key for key, _, _ in FOOD_LISTS}
+
+
+def food_items(entry: dict, key: str) -> list[str] | None:
+    """The items an entry recorded for one food list, or None when not asked.
+
+    An entry after the split answers `foods_fodmap` and `foods_other`. An entry
+    from before it answered the single `foods` list: each of those values goes to
+    the list that holds it now, and the other list stays blank. An old "none"
+    answered both lists, because it meant none of either.
+    """
+    answers = entry.get("answers", {})
+    value = answers.get(key)
+    if isinstance(value, list):
+        return [str(item) for item in value]
+    legacy = answers.get("foods")
+    if not isinstance(legacy, list):
+        return None
+    return [
+        str(item)
+        for item in legacy
+        if str(item) == "none" or LEGACY_FOOD_LISTS.get(str(item)) == key
+    ]
+
+
 def cell(entry: dict, key: str) -> str:
+    if key in FOOD_KEYS:
+        items = food_items(entry, key)
+        return "" if items is None else "; ".join(items)
     if key in LIST_FIELDS:
         value = entry.get("answers", {}).get(key) or []
         return "; ".join(str(item) for item in value)
@@ -375,13 +447,36 @@ def write_markdown(entries: list[dict], month: date, stream) -> None:
         )
 
     # --- foods and next-day pain --------------------------------------------
+    # Both food lists are grouped the same way: the days a group was eaten, and
+    # the mean worst pain the next day. A value from before the split keeps its
+    # old label and appears after its list's own groups, marked as such.
     by_user_date: dict[str, dict[str, dict]] = defaultdict(dict)
     for entry in entries:
         if entry.get("date"):
             by_user_date[entry.get("user", "")][entry.get("date")] = entry
 
-    stats: dict[str, dict[str, float]] = {
-        group: {"eaten": 0.0, "next_days": 0.0, "pain_sum": 0.0} for group in FOOD_GROUPS
+    declared = {group for _, groups, _ in FOOD_LISTS for group in groups}
+    legacy_seen: dict[str, list[str]] = {key: [] for key, _, _ in FOOD_LISTS}
+    for entry in entries:
+        legacy = entry.get("answers", {}).get("foods")
+        if not isinstance(legacy, list):
+            continue
+        for item in legacy:
+            item = str(item)
+            key = LEGACY_FOOD_LISTS.get(item)
+            if item == "none" or item in declared or key is None:
+                continue
+            if item not in legacy_seen[key]:
+                legacy_seen[key].append(item)
+
+    rows: list[tuple[str, str, str]] = []
+    for key, groups, label in FOOD_LISTS:
+        rows += [(key, label, group) for group in groups]
+        rows += [(key, label, group) for group in legacy_seen[key]]
+
+    stats: dict[tuple[str, str], dict[str, float]] = {
+        (key, group): {"eaten": 0.0, "next_days": 0.0, "pain_sum": 0.0}
+        for key, _, group in rows
     }
     for entry in entries:
         day = entry.get("date")
@@ -391,19 +486,17 @@ def write_markdown(entries: list[dict], month: date, stream) -> None:
             following = (date.fromisoformat(day) + timedelta(days=1)).isoformat()
         except ValueError:
             continue
-        eaten = entry.get("answers", {}).get("foods") or []
-        if not isinstance(eaten, list):
-            continue
         next_entry = by_user_date.get(entry.get("user", ""), {}).get(following)
         next_pain = None
         if next_entry is not None:
             raw = next_entry.get("answers", {}).get("worst_pain")
             if isinstance(raw, (int, float)) and not isinstance(raw, bool):
                 next_pain = float(raw)
-        for group in FOOD_GROUPS:
+        for key, _, group in rows:
+            eaten = food_items(entry, key) or []
             if group not in eaten:
                 continue
-            bucket = stats[group]
+            bucket = stats[(key, group)]
             bucket["eaten"] += 1
             if next_pain is not None:
                 bucket["next_days"] += 1
@@ -411,18 +504,20 @@ def write_markdown(entries: list[dict], month: date, stream) -> None:
 
     write("## Foods, and the pain the next day\n\n")
     write(
-        "For each food group: days it was eaten, and the mean worst pain the following day. "
-        "The denominator is days where a next-day entry exists, so it is smaller than the "
-        "number of times eaten.\n\n"
+        "For each food group: the list it came from, the days it was eaten, and the mean "
+        "worst pain the following day. The denominator is days where a next-day entry "
+        "exists, so it is smaller than the number of times eaten. A group marked "
+        "(before the split) was recorded under its old label, in the list that holds it.\n\n"
     )
-    write("| food group | days eaten | next-day pain (n) | mean next-day pain |\n")
-    write("| --- | --- | --- | --- |\n")
-    for group in FOOD_GROUPS:
-        bucket = stats[group]
+    write("| list | food group | days eaten | next-day pain (n) | mean next-day pain |\n")
+    write("| --- | --- | --- | --- | --- |\n")
+    for key, label, group in rows:
+        bucket = stats[(key, group)]
         eaten = int(bucket["eaten"])
         n = int(bucket["next_days"])
         mean = f"{bucket['pain_sum'] / n:.1f}" if n else "—"
-        write(f"| {group} | {eaten} | {n} | {mean} |\n")
+        name = f"{group} (before the split)" if group in legacy_seen[key] else group
+        write(f"| {label} | {name} | {eaten} | {n} | {mean} |\n")
 
     medications = Counter()
     for entry in entries:

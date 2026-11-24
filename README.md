@@ -61,7 +61,7 @@ links in the configured channel (or the system channel by default).
 
 ## Daily gut check-in
 
-A 21:00 DM diary for a GI clinic: eighteen select menus, one **Notes** modal, no
+A 21:00 DM diary for a GI clinic: nineteen select menus, one **Notes** modal, no
 typed commands and no privileged intents. It is a separate feature from the
 calendar path and does not read or write anything the calendar path uses.
 
@@ -94,17 +94,26 @@ confirmation keeps **Add notes** and **Edit tonight**: both rebuild that date's
 draft from the stored entry, so they still work after a restart, and a resubmit
 corrects the one line.
 
-`answers` has the eighteen fields: `worst_pain`, `bloating`, `upper_gi`,
+`answers` has the nineteen fields: `worst_pain`, `bloating`, `upper_gi`,
 `pain_location` (none / upper middle / upper right / around the navel / lower
 right / lower left / all over), `other_symptoms` (a list: nausea, vomiting, cold
 sweats, cramping, fatigue, headache, dizziness, fever, mucus in stool), then
 `bowel_movements` (4 means "4 or more"), `bristol` (1-7 or `"none"`), `urgency`,
-`woke_at_night`, `foods`, `medications`, `stress`, `sleep`, `meals` (a list),
-`caffeine`, `alcohol`, `last_meal`, `spicy`. Diet, pain location and symptoms
-arrived after the first entries; a line without them exports a blank cell, not a
-zero.
+`woke_at_night`, `foods_fodmap` (a list: dairy, wheat, onion/garlic, legumes,
+apple/pear, stone fruit, honey/HFCS/sorbitol, mushroom, cauliflower/broccoli,
+avocado, mango/watermelon, rye/barley, none), `foods_other` (a list: chocolate,
+sweets/desserts, fried or fatty, lean or low-fat meals, carbonated, caffeine,
+alcohol, spicy, artificial sweeteners, none), `medications`, `stress`, `sleep`,
+`meals` (a list), `caffeine`, `alcohol`, `last_meal`, `spicy`. Diet, pain
+location and symptoms arrived after the first entries; a line without them
+exports a blank cell, not a zero.
 
-The eighteen selects are split over five pages, at most four per page plus the
+The food question used to be one `foods` list. Entries from before the split keep
+their `foods` values in the file: the export maps each value into the list that
+holds it now (`apple/pear/stone fruit` lists under high-FODMAP, `fried/fatty`
+under other) and leaves the other column blank, so an old month still adds up.
+
+The nineteen selects are split over five pages, at most four per page plus the
 page's button row, which is Discord's five-row limit per message.
 
 Red flags are detected from the notes box (the alarm list in the spec has no
@@ -123,8 +132,8 @@ python3 scripts/export.py --month 2026-11 --format md --out ~/Desktop/gut.md
 Reads `data/survey/2026-11.jsonl` and prints to stdout, or writes the path you
 give. It refuses a path inside this repository — the CSV leaves the checkout by
 hand. The Markdown summary reports adherence, severity medians, the Bristol
-distribution, the diet counts, and for each food group the days eaten with the
-mean next-day pain and that mean's denominator (`n`).
+distribution, the diet counts, and for each food group the list it came from, the
+days eaten with the mean next-day pain, and that mean's denominator (`n`).
 
 ### Scheduling and safety notes
 

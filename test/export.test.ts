@@ -33,7 +33,8 @@ const entry = (date: string, answers: Record<string, unknown>, extra: Record<str
     bristol: 4,
     urgency: "no",
     woke_at_night: "no",
-    foods: ["none"],
+    foods_fodmap: ["none"],
+    foods_other: ["none"],
     medications: ["PPI"],
     stress: 1,
     sleep: "7-8 h",
@@ -57,14 +58,17 @@ async function fixture(t: { after: (fn: () => Promise<void>) => void }): Promise
     await rm(dir, { recursive: true, force: true });
   });
   const entries = [
-    entry("2026-11-01", { worst_pain: 5, foods: ["dairy"] }, {
+    entry("2026-11-01", { worst_pain: 5, foods_fodmap: ["dairy"] }, {
       notes: { other: "cheese at lunch, pain after", red_flags_note: "" },
     }),
-    entry("2026-11-02", { worst_pain: 7, foods: ["none"] }, {
+    entry("2026-11-02", { worst_pain: 7, foods_fodmap: ["none"] }, {
       red_flags: ["gi_bleeding"],
       notes: { other: "", red_flags_note: "blood in stool" },
     }),
-    entry("2026-11-03", { worst_pain: 3, foods: ["dairy", "caffeine"], bristol: "none" }),
+    entry(
+      "2026-11-03",
+      { worst_pain: 3, foods_fodmap: ["dairy"], foods_other: ["caffeine"], bristol: "none" },
+    ),
   ];
   await writeFile(
     join(dir, "2026-11.jsonl"),
@@ -99,7 +103,8 @@ skipUnlessPython("the CSV has one column per field plus notes and flags", async 
     "bristol",
     "urgency",
     "woke_at_night",
-    "foods",
+    "foods_fodmap",
+    "foods_other",
     "medications",
     "stress",
     "sleep",
@@ -118,7 +123,7 @@ skipUnlessPython("the CSV has one column per field plus notes and flags", async 
   assert.match(lines[1], /cheese at lunch, pain after/);
   assert.match(lines[1], /"cheese at lunch, pain after"/, "a comma in a note must be quoted");
   assert.match(lines[2], /vomiting blood, black or tarry stools, or blood in stool/);
-  assert.match(lines[3], /dairy; caffeine/);
+  assert.match(lines[3], /,dairy,caffeine,/, "the two food lists are separate columns");
   assert.match(lines[3], /,none,/, "bristol none survives as its own value");
   assert.match(lines[1], /upper right/, "the pain location is its own column");
   assert.match(lines[1], /nausea; cold sweats/, "a symptom list is joined like the other lists");
@@ -143,8 +148,16 @@ skipUnlessPython("the Markdown summary carries adherence, medians, Bristol and f
   assert.match(stdout, /Worst pain \(0-10\): median 5, mean 5\.0 \(n=3\)/);
   assert.match(stdout, /Bristol distribution: 1: 0, 2: 0, 3: 0, 4: 2, none: 1|Bristol distribution: 4: 2, none: 1/);
   assert.match(stdout, /## Foods, and the pain the next day/);
-  assert.match(stdout, /\| dairy \| 2 \| 1 \| 7\.0 \|/, "eaten twice, one next-day pain");
-  assert.match(stdout, /\| caffeine \| 1 \| 0 \| — \|/, "last day of the file has no next day");
+  assert.match(
+    stdout,
+    /\| high-FODMAP \| dairy \| 2 \| 1 \| 7\.0 \|/,
+    "eaten twice, one next-day pain, and the list each row came from",
+  );
+  assert.match(
+    stdout,
+    /\| other \| caffeine \| 1 \| 0 \| — \|/,
+    "the other list, and the last day of the file has no next day",
+  );
   assert.match(stdout, /## Red flags/);
   assert.match(stdout, /2026-11-02: vomiting blood/);
   assert.match(stdout, /1 entry reported an alarm symptom/);
@@ -211,6 +224,10 @@ skipUnlessPython("an entry from before the diet fields exports blanks, not zeros
   ]) {
     assert.equal(cells[columns.indexOf(key)], "", `${key} is blank when it was never asked`);
   }
+  // These lines predate the split but did answer the old `foods` question with
+  // "none", which answers both new lists; neither column is a blank.
+  assert.equal(cells[columns.indexOf("foods_fodmap")], "none");
+  assert.equal(cells[columns.indexOf("foods_other")], "none");
 
   const md = await run("python3", [
     SCRIPT,
@@ -227,6 +244,88 @@ skipUnlessPython("an entry from before the diet fields exports blanks, not zeros
   assert.match(md.stdout, /\| caffeine \(1\+\) \| 0 \| — \|/);
   assert.match(md.stdout, /\| last meal within 2 h \| 0 \| — \|/);
   assert.doesNotMatch(md.stdout, /NaN|Traceback/, "no mean is divided by a zero denominator");
+});
+
+skipUnlessPython("an entry from before the food split maps its foods into the two lists", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "bishop-export-foods-"));
+  t.after(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+  // November's first two days answered the single `foods` list. Day two uses the
+  // two values that changed wording in the split.
+  const { foods_fodmap: _fodmap, foods_other: _other, ...beforeSplit } = entry(
+    "2026-11-01",
+    {},
+  ).answers as Record<string, unknown>;
+  void _fodmap;
+  void _other;
+  const legacy = (day: string, pain: number, foods: string[]) =>
+    entry(day, {}, { answers: { ...beforeSplit, worst_pain: pain, foods } });
+  const lines = [
+    legacy("2026-11-01", 5, ["dairy", "caffeine"]),
+    legacy("2026-11-02", 6, ["apple/pear/stone fruit", "fried/fatty"]),
+    legacy("2026-11-03", 4, ["none"]),
+    entry("2026-11-04", {
+      worst_pain: 2,
+      foods_fodmap: ["mushroom"],
+      foods_other: ["chocolate", "lean or low-fat meals"],
+    }),
+  ];
+  await writeFile(
+    join(dir, "2026-11.jsonl"),
+    lines.map((item) => JSON.stringify(item)).join("\n") + "\n",
+    "utf8",
+  );
+
+  const csv = await run("python3", [
+    SCRIPT,
+    "--month",
+    "2026-11",
+    "--format",
+    "csv",
+    "--data-dir",
+    dir,
+  ]);
+  const [header, ...body] = csv.stdout.trim().split("\n");
+  const columns = header.split(",");
+  const foodCell = (line: string, key: string) => {
+    // Every fixture cell is unquoted; the notes are the only quoted field and
+    // they come after the food columns, so splitting is safe here.
+    return line.split(",")[columns.indexOf(key)];
+  };
+  assert.equal(foodCell(body[0], "foods_fodmap"), "dairy");
+  assert.equal(foodCell(body[0], "foods_other"), "caffeine");
+  assert.equal(
+    foodCell(body[1], "foods_fodmap"),
+    "apple/pear/stone fruit",
+    "an old value keeps its wording, in the list that holds it",
+  );
+  assert.equal(foodCell(body[1], "foods_other"), "fried/fatty");
+  assert.equal(foodCell(body[2], "foods_fodmap"), "none", "an old none answered both lists");
+  assert.equal(foodCell(body[2], "foods_other"), "none");
+  assert.equal(foodCell(body[3], "foods_fodmap"), "mushroom");
+  assert.equal(foodCell(body[3], "foods_other"), "chocolate; lean or low-fat meals");
+
+  const md = await run("python3", [
+    SCRIPT,
+    "--month",
+    "2026-11",
+    "--format",
+    "md",
+    "--data-dir",
+    dir,
+  ]);
+  assert.doesNotMatch(md.stdout, /Traceback|KeyError/, "an old foods line does not crash the summary");
+  assert.match(md.stdout, /\| high-FODMAP \| dairy \| 1 \| 1 \| 6\.0 \|/);
+  assert.match(md.stdout, /\| other \| caffeine \| 1 \| 1 \| 6\.0 \|/);
+  assert.match(
+    md.stdout,
+    /\| high-FODMAP \| apple\/pear\/stone fruit \(before the split\) \| 1 \|/,
+    "a renamed old group is marked, not dropped",
+  );
+  assert.match(md.stdout, /\| other \| fried\/fatty \(before the split\) \| 1 \|/);
+  assert.match(md.stdout, /\| high-FODMAP \| mushroom \| 1 \| 0 \| — \|/);
+  assert.match(md.stdout, /\| other \| chocolate \| 1 \| 0 \| — \|/);
 });
 
 skipUnlessPython("the script refuses to write inside the repository", async (t) => {

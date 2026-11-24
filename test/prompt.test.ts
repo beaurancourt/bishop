@@ -43,9 +43,9 @@ function componentsOf(message: ReturnType<typeof buildSurveyMessage>): RawCompon
 const rowsOf = (message: ReturnType<typeof buildSurveyMessage>) =>
   message.components as unknown as RawComponent[];
 
-test("the eighteen fast-path fields are all present and none is repeated", () => {
-  assert.equal(FIELDS.length, 18);
-  assert.equal(new Set(FIELD_KEYS).size, 18);
+test("the nineteen fast-path fields are all present and none is repeated", () => {
+  assert.equal(FIELDS.length, 19);
+  assert.equal(new Set(FIELD_KEYS).size, 19);
   assert.deepEqual(
     [...FIELD_KEYS].sort(),
     [
@@ -54,7 +54,8 @@ test("the eighteen fast-path fields are all present and none is repeated", () =>
       "bowel_movements",
       "bristol",
       "caffeine",
-      "foods",
+      "foods_fodmap",
+      "foods_other",
       "last_meal",
       "meals",
       "medications",
@@ -89,7 +90,7 @@ test("every page fits Discord's five action rows and five components per row", (
     }
     for (const field of fields) seen.add(field.key);
   }
-  assert.equal(seen.size, 18);
+  assert.equal(seen.size, 19);
 });
 
 test("each select's custom id carries the date and the field, and parses back", () => {
@@ -116,9 +117,13 @@ test("each select's custom id carries the date and the field, and parses back", 
 
 test("a re-rendered page shows the answers already given", () => {
   const answers = applyAnswer(
-    applyAnswer({}, "worst_pain", ["7"]),
-    "foods",
-    ["dairy", "wheat"],
+    applyAnswer(
+      applyAnswer({}, "worst_pain", ["7"]),
+      "foods_fodmap",
+      ["dairy", "wheat"],
+    ),
+    "foods_other",
+    ["caffeine"],
   );
   const first = buildSurveyMessage(DATE, answers, 1);
   const pain = componentsOf(first).find((c) => c.custom_id === customIds.field(DATE, "worst_pain"));
@@ -126,12 +131,21 @@ test("a re-rendered page shows the answers already given", () => {
   assert.deepEqual(defaults, ["7"]);
 
   const third = buildSurveyMessage(DATE, answers, 3);
-  const foods = componentsOf(third).find((c) => c.custom_id === customIds.field(DATE, "foods"));
+  const fodmap = componentsOf(third).find(
+    (c) => c.custom_id === customIds.field(DATE, "foods_fodmap"),
+  );
   assert.deepEqual(
-    (foods?.options ?? []).filter((o) => o.default).map((o) => o.value),
+    (fodmap?.options ?? []).filter((o) => o.default).map((o) => o.value),
     ["dairy", "wheat"],
   );
-  assert.equal(foods?.max_values, 11);
+  assert.equal(fodmap?.max_values, 13);
+  const other = componentsOf(third).find(
+    (c) => c.custom_id === customIds.field(DATE, "foods_other"),
+  );
+  assert.deepEqual(
+    (other?.options ?? []).filter((o) => o.default).map((o) => o.value),
+    ["caffeine"],
+  );
 });
 
 test("the last page has Notes and Submit, both tied to the date", () => {
@@ -197,13 +211,16 @@ test("custom ids from other features, and malformed dates, are not ours", () => 
 });
 
 test("none never coexists with a real item in a multi-select", () => {
-  let answers = applyAnswer({}, "foods", ["none", "dairy"]);
-  assert.deepEqual(answers.foods, ["dairy"]);
-  answers = applyAnswer(answers, "foods", ["none"]);
-  assert.deepEqual(answers.foods, ["none"]);
-  answers = applyAnswer(answers, "foods", ["dairy", "caffeine"]);
-  assert.deepEqual(answers.foods, ["dairy", "caffeine"]);
-  assert.deepEqual(selectedValues(fieldByKey("foods")!, answers.foods), ["dairy", "caffeine"]);
+  let answers = applyAnswer({}, "foods_fodmap", ["none", "dairy"]);
+  assert.deepEqual(answers.foods_fodmap, ["dairy"]);
+  answers = applyAnswer(answers, "foods_fodmap", ["none"]);
+  assert.deepEqual(answers.foods_fodmap, ["none"]);
+  answers = applyAnswer(answers, "foods_other", ["chocolate", "caffeine"]);
+  assert.deepEqual(answers.foods_other, ["chocolate", "caffeine"]);
+  assert.deepEqual(
+    selectedValues(fieldByKey("foods_other")!, answers.foods_other),
+    ["chocolate", "caffeine"],
+  );
 });
 
 test("a value outside the menu is refused rather than stored", () => {
@@ -237,15 +254,15 @@ test("the diet questions store exactly the spec's answer values", () => {
   assert.equal(answers.last_meal, "2–3 h");
   assert.equal(answers.spicy, "yes");
 
-  // They are spread over pages three and four, inside the row budget.
-  for (const key of ["meals", "caffeine", "alcohol"]) {
+  // They are spread over pages four and five, inside the row budget.
+  for (const key of ["meals", "caffeine"]) {
     assert.equal(FIELDS.find((field) => field.key === key)?.page, 4);
   }
-  for (const key of ["last_meal", "spicy"]) {
+  for (const key of ["alcohol", "last_meal", "spicy"]) {
     assert.equal(FIELDS.find((field) => field.key === key)?.page, 5);
   }
-  // The counter copy reports the new total, not the old sixteen.
-  assert.match(buildSurveyMessage(DATE, {}, 1).content, /answered 0 of 18/);
+  // The counter copy reports the new total, not the old eighteen.
+  assert.match(buildSurveyMessage(DATE, {}, 1).content, /answered 0 of 19/);
 });
 
 test("the symptom fields store exactly the spec's answer values", () => {
@@ -293,9 +310,69 @@ test("the symptom fields store exactly the spec's answer values", () => {
   );
 });
 
+test("the food question is two lists, split by the spec's groups", () => {
+  const values = (key: string) => fieldByKey(key)?.options.map((option) => option.value);
+  assert.deepEqual(values("foods_fodmap"), [
+    "dairy",
+    "wheat",
+    "onion/garlic",
+    "legumes",
+    "apple/pear",
+    "stone fruit",
+    "honey/HFCS/sorbitol",
+    "mushroom",
+    "cauliflower/broccoli",
+    "avocado",
+    "mango/watermelon",
+    "rye/barley",
+    "none",
+  ]);
+  assert.deepEqual(values("foods_other"), [
+    "chocolate",
+    "sweets/desserts",
+    "fried or fatty",
+    "lean or low-fat meals",
+    "carbonated",
+    "caffeine",
+    "alcohol",
+    "spicy",
+    "artificial sweeteners",
+    "none",
+  ]);
+
+  // Both are multi-selects; a pick round-trips into the stored answer and back
+  // onto the menu.
+  let answers = applyAnswer({}, "foods_fodmap", ["dairy", "avocado"]);
+  answers = applyAnswer(answers, "foods_other", ["fried or fatty"]);
+  assert.deepEqual(answers.foods_fodmap, ["dairy", "avocado"]);
+  assert.deepEqual(answers.foods_other, ["fried or fatty"]);
+  assert.equal(fieldByKey("foods_fodmap")?.kind, "multi");
+  assert.equal(fieldByKey("foods_other")?.kind, "multi");
+
+  const page = buildSurveyMessage(DATE, answers, 3);
+  const selected = (key: string) =>
+    (componentsOf(page)
+      .find((component) => component.custom_id === customIds.field(DATE, key))
+      ?.options ?? [])
+      .filter((option) => option.default)
+      .map((option) => option.value);
+  assert.deepEqual(selected("foods_fodmap"), ["dairy", "avocado"]);
+  assert.deepEqual(selected("foods_other"), ["fried or fatty"]);
+
+  // The two lists sit together on page three, with the page still inside
+  // Discord's four-select, five-row budget.
+  assert.equal(fieldByKey("foods_fodmap")?.page, 3);
+  assert.equal(fieldByKey("foods_other")?.page, 3);
+  assert.equal(fieldsOnPage(3).length, 4);
+  assert.equal(rowsOf(page).length, 5);
+  // The old key is gone from the menus; a stored line keeps it, and the export
+  // is what maps it.
+  assert.equal(fieldByKey("foods"), undefined);
+});
+
 test("a submission missing fields is named, not written", () => {
   const answers = applyAnswer({}, "worst_pain", ["3"]);
-  assert.equal(missingFields(answers).length, 17);
+  assert.equal(missingFields(answers).length, 18);
   const notice = missingFieldsNotice(answers);
   assert.ok(notice?.includes("Bloating"));
   assert.ok(!notice?.includes("Worst abdominal pain"));

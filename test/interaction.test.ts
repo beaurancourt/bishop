@@ -25,7 +25,8 @@ function fullAnswers(): Answers {
     bristol: "4",
     urgency: "no",
     woke_at_night: "no",
-    foods: ["dairy"],
+    foods_fodmap: ["dairy"],
+    foods_other: ["none"],
     medications: ["PPI"],
     stress: 1,
     sleep: "7-8 h",
@@ -269,8 +270,10 @@ test("the diet answers round-trip into the submitted entry", async (t) => {
   assert.equal(stored.answers.spicy, "yes");
   // The fields that were there before keep their ids and their stored values.
   assert.equal(stored.answers.worst_pain, 7);
-  assert.deepEqual(stored.answers.foods, ["dairy"]);
   assert.equal(stored.answers.bristol, "4");
+  // The two food lists are stored side by side, each on its own.
+  assert.deepEqual(stored.answers.foods_fodmap, ["dairy"]);
+  assert.deepEqual(stored.answers.foods_other, ["none"]);
 });
 
 test("the symptom answers round-trip into the submitted entry", async (t) => {
@@ -286,9 +289,9 @@ test("the symptom answers round-trip into the submitted entry", async (t) => {
   const stored = JSON.parse((await monthLines(dir))[0]) as { answers: Answers };
   assert.equal(stored.answers.pain_location, "upper right");
   assert.deepEqual(stored.answers.other_symptoms, ["nausea", "cold sweats"]);
-  // The eighteen-fast-path entry keeps every earlier id and value.
+  // The nineteen-fast-path entry keeps every earlier id and value.
   assert.equal(stored.answers.worst_pain, 7);
-  assert.deepEqual(stored.answers.foods, ["dairy"]);
+  assert.deepEqual(stored.answers.foods_fodmap, ["dairy"]);
   assert.equal(stored.answers.last_meal, "2–3 h");
 });
 
@@ -312,7 +315,7 @@ test("a restart between the prompt and Next keeps the earlier answers", async (t
   await handleInteraction(next.interaction);
 
   assert.deepEqual(next.events, ["deferUpdate", "editReply"]);
-  assert.match(String(next.edits.at(-1)?.content), /answered 1 of 18/);
+  assert.match(String(next.edits.at(-1)?.content), /answered 1 of 19/);
 });
 
 test("a select menu answer is acknowledged before it is stored", async (t) => {
@@ -331,7 +334,7 @@ test("a select menu answer is acknowledged before it is stored", async (t) => {
 
   assert.deepEqual(click.events, ["deferUpdate", "editReply"]);
   assert.equal(fileAtAck, false);
-  assert.match(String(click.edits.at(-1)?.content), /answered 1 of 18/);
+  assert.match(String(click.edits.at(-1)?.content), /answered 1 of 19/);
   assert.equal(drafts.get(USER, DATE)?.answers.worst_pain, 7);
   assert.equal(existsSync(join(dir, "drafts.json")), true);
 });
@@ -362,7 +365,7 @@ test("the confirmation keeps Add notes and Edit tonight, and a resubmit replaces
   const edit = fakeInteraction({ customId: `survey:${DATE}:edit`, isButton: true });
   await handleInteraction(edit.interaction);
   assert.match(String(edit.edits.at(-1)?.content), /Page 1 of 5/);
-  assert.match(String(edit.edits.at(-1)?.content), /answered 18 of 18/);
+  assert.match(String(edit.edits.at(-1)?.content), /answered 19 of 19/);
   assert.equal(drafts.get(USER, DATE)?.answers.worst_pain, 7, "the stored answers came back");
 
   // One answer changes, then Submit again.
@@ -461,7 +464,7 @@ test("a restart between Submit and the confirmation buttons does not break them"
   const edit = fakeInteraction({ customId: `survey:${DATE}:edit`, isButton: true });
   await handleInteraction(edit.interaction);
   assert.match(String(edit.edits.at(-1)?.content), /Page 1 of 5/);
-  assert.match(String(edit.edits.at(-1)?.content), /answered 18 of 18/);
+  assert.match(String(edit.edits.at(-1)?.content), /answered 19 of 19/);
   assert.equal(drafts.get(USER, DATE)?.answers.bloating, 3);
 
   const again = fakeInteraction({ customId: `survey:${DATE}:submit`, isButton: true });

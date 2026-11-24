@@ -1,10 +1,15 @@
 /**
- * The eighteen fast-path fields of the daily gut check-in, and the one place that
+ * The nineteen fast-path fields of the daily gut check-in, and the one place that
  * knows how a select-menu value becomes a stored answer.
  *
  * The shape here is the storage shape: `answers` is keyed by `FieldKey`, and a
  * value is either a number, a string, or (for the multi-selects) a string
  * array. Nothing in this module touches Discord or the filesystem.
+ *
+ * The food question used to be one `foods` list. It is now two lists,
+ * `foods_fodmap` and `foods_other`, because a high-FODMAP trigger and a fried
+ * meal are different hypotheses. Entries written before the split keep their
+ * `foods` values in the file; the export maps them (scripts/export.py).
  */
 
 /** Multi-select sentinel: "none" means the list is empty for that day. */
@@ -20,7 +25,8 @@ export type FieldKey =
   | "bristol"
   | "urgency"
   | "woke_at_night"
-  | "foods"
+  | "foods_fodmap"
+  | "foods_other"
   | "medications"
   | "stress"
   | "sleep"
@@ -78,21 +84,45 @@ export const BRISTOL_OPTIONS: FieldOption[] = [
   { label: "none", value: NONE },
 ];
 
-/** Food groups between which the low-FODMAP trial separates a trigger. */
-export const FOOD_OPTIONS: FieldOption[] = [
+/**
+ * The high-FODMAP groups between which a low-FODMAP reintroduction separates a
+ * trigger. Monash's reintroduction phase names one group at a time; each value
+ * is stable and lowercase because the export groups days by exactly these.
+ */
+export const FODMAP_FOOD_OPTIONS: FieldOption[] = [
   { label: "dairy", value: "dairy" },
   { label: "wheat", value: "wheat" },
   { label: "onion/garlic", value: "onion/garlic" },
   { label: "legumes", value: "legumes" },
-  { label: "apple/pear/stone fruit", value: "apple/pear/stone fruit" },
+  { label: "apple/pear", value: "apple/pear" },
+  { label: "stone fruit", value: "stone fruit" },
   {
     label: "honey/high-fructose corn syrup/sorbitol",
     value: "honey/HFCS/sorbitol",
   },
+  { label: "mushroom", value: "mushroom" },
+  { label: "cauliflower/broccoli", value: "cauliflower/broccoli" },
+  { label: "avocado", value: "avocado" },
+  { label: "mango/watermelon", value: "mango/watermelon" },
+  { label: "rye/barley", value: "rye/barley" },
+  { label: "none", value: NONE },
+];
+
+/**
+ * Everything else worth a line in the diary. `lean or low-fat meals` is a
+ * positive marker, so a fatty day and a low-fat day can be compared rather than
+ * only the fatty one being recorded.
+ */
+export const OTHER_FOOD_OPTIONS: FieldOption[] = [
+  { label: "chocolate", value: "chocolate" },
+  { label: "sweets/desserts", value: "sweets/desserts" },
+  { label: "fried or fatty", value: "fried or fatty" },
+  { label: "lean or low-fat meals", value: "lean or low-fat meals" },
+  { label: "carbonated", value: "carbonated" },
   { label: "caffeine", value: "caffeine" },
   { label: "alcohol", value: "alcohol" },
-  { label: "fried/fatty", value: "fried/fatty" },
-  { label: "carbonated", value: "carbonated" },
+  { label: "spicy", value: "spicy" },
+  { label: "artificial sweeteners", value: "artificial sweeteners" },
   { label: "none", value: NONE },
 ];
 
@@ -159,15 +189,15 @@ export const SYMPTOM_OPTIONS: FieldOption[] = enumOptions(
 );
 
 /**
- * Page 1: pain severity and the two "how much" numbers.
+ * Page 1: pain severity, the two "how much" numbers, and bowel movements.
  * Page 2: where the pain was, the symptom list, and gut behaviour.
- * Page 3: the night question, stress, and the two diet multi-selects.
- * Page 4: sleep, the meals, and the drink buckets.
- * Page 5: the two "how late / what kind" diet questions.
+ * Page 3: the night question, stress, and the two food lists side by side.
+ * Page 4: medication, sleep, the meals, and caffeine servings.
+ * Page 5: alcohol, the last meal, and spicy or acidic food.
  *
  * Discord allows five action rows per message and one component per row for a
  * select menu, so a page carries at most four menus plus its button row. The
- * eighteen fields therefore need five pages; `PAGE_COUNT` follows the assignments
+ * nineteen fields therefore need five pages; `PAGE_COUNT` follows the assignments
  * below, and a test asserts the row budget for every page.
  */
 export const FIELDS: FieldDef[] = [
@@ -258,19 +288,27 @@ export const FIELDS: FieldDef[] = [
     options: scale(0, 4),
   },
   {
-    key: "foods",
-    prompt: "Foods of note today (choose any)",
-    placeholder: "foods of note",
+    key: "foods_fodmap",
+    prompt: "High-FODMAP foods today (choose any)",
+    placeholder: "high-FODMAP foods",
     kind: "multi",
     page: 3,
-    options: FOOD_OPTIONS,
+    options: FODMAP_FOOD_OPTIONS,
+  },
+  {
+    key: "foods_other",
+    prompt: "Other foods of note today (choose any)",
+    placeholder: "other foods of note",
+    kind: "multi",
+    page: 3,
+    options: OTHER_FOOD_OPTIONS,
   },
   {
     key: "medications",
     prompt: "Medication today (choose any)",
     placeholder: "medication today",
     kind: "multi",
-    page: 3,
+    page: 4,
     options: MEDICATION_OPTIONS,
   },
   {
@@ -302,7 +340,7 @@ export const FIELDS: FieldDef[] = [
     prompt: "Alcohol drinks",
     placeholder: "alcohol drinks",
     kind: "enum",
-    page: 4,
+    page: 5,
     options: SERVING_OPTIONS,
   },
   {

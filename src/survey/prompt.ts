@@ -1,5 +1,5 @@
 /**
- * Everything the check-in says in Discord: the eighteen selects, the page buttons,
+ * Everything the check-in says in Discord: the nineteen selects, the page buttons,
  * the notes modal, the intro, and the control acks. Plain data only, so the
  * builder can be unit-tested without a client or a gateway.
  *
