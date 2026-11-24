@@ -56,3 +56,83 @@ links in the configured channel (or the system channel by default).
 - `src/calendar.ts` — provider URLs and `.ics` generation (no Discord types).
 - `src/event.ts` — maps a discord.js scheduled event to a calendar event.
 - `src/index.ts` — gateway client, channel resolution, message posting.
+- `src/survey/` — the daily gut check-in (below).
+- `scripts/export.py` — CSV / Markdown export of a month of check-ins.
+
+## Daily gut check-in
+
+A 21:00 DM diary for a GI clinic: eleven select menus, one **Notes** modal, no
+typed commands and no privileged intents. It is a separate feature from the
+calendar path and does not read or write anything the calendar path uses.
+
+Enable it by naming who may be messaged:
+
+```sh
+SURVEY_USER_IDS=123456789012345678          # comma-separated
+# or data/survey/config.json: {"user_ids": ["123456789012345678"]}
+```
+
+Anyone not listed is ignored: no DM, and a component they click is not answered
+with an entry. The first message each person receives explains what is recorded,
+says plainly that it is not medical advice, and offers **Pause** and **Delete my
+data**.
+
+What it writes, under `BISHOP_SURVEY_DIR` (default `data/survey`, which git
+ignores):
+
+```
+data/survey/2026-11.jsonl   one entry per line, one file per month
+data/survey/state.json      who has seen the intro, who is paused
+```
+
+An entry is `{date, user, started_at, submitted_at, answers, notes, red_flags}`,
+serialised with `JSON.stringify` (a note with quotes or newlines cannot break the
+line). Submitting again for the same date rewrites that line instead of adding
+one. A skipped day has no line at all, so it is never recorded as a zero.
+
+`answers` has the eleven fields: `worst_pain`, `bloating`, `upper_gi`,
+`bowel_movements` (4 means "4 or more"), `bristol` (1-7 or `"none"`), `urgency`,
+`woke_at_night`, `foods`, `medications`, `stress`, `sleep`.
+
+Red flags are detected from the notes box (the alarm list in the spec has no
+yes/no field in the fast path). When one fires, the confirmation says to contact
+the doctor today and to seek urgent care for vomiting blood, black stools,
+fainting or severe chest pain. It never reassures. The keys that fired are
+stored in `red_flags`.
+
+### Export
+
+```sh
+python3 scripts/export.py --month 2026-11 --format csv
+python3 scripts/export.py --month 2026-11 --format md --out ~/Desktop/gut.md
+```
+
+Reads `data/survey/2026-11.jsonl` and prints to stdout, or writes the path you
+give. It refuses a path inside this repository — the CSV leaves the checkout by
+hand. The Markdown summary reports adherence, severity medians, the Bristol
+distribution, and for each food group the days eaten with the mean next-day pain
+and that mean's denominator (`n`).
+
+### Scheduling and safety notes
+
+- The timer is a chained `setTimeout`, re-armed after each run from the next
+  wall-clock 21:00 in `America/New_York`, so a DST change moves the UTC instant,
+  not the local hour. It never blocks the event loop: DM sends are awaited inside
+  async callbacks, and one blocked DM does not stop the others.
+- Half-finished pages live in memory only. A restart loses an unfinished page,
+  never a submitted entry.
+- `SURVEY_SEND_ON_START=1` sends one check-in at startup without waiting for
+  21:00, for a deployment smoke test.
+
+## Tests
+
+```sh
+npm test        # node --test through tsx, no Discord connection
+npm run typecheck
+```
+
+`node:test` is built into Node 20+, so the runner is not a dependency. `tsx` is
+already in the project for `npm start`, and it lets the runner import the
+TypeScript sources directly, so tests exercise the same code the bot runs.
+Vitest would add a dependency for no extra capability here.
+

@@ -22,6 +22,7 @@ import {
 import { toCalendarEvent } from "./event.js";
 import { startHttpServer } from "./http.js";
 import { forgetMessage, getMessage, rememberMessage } from "./store.js";
+import { installSurvey } from "./survey/index.js";
 
 const token = process.env.DISCORD_TOKEN;
 if (!token) {
@@ -34,6 +35,10 @@ const announceChannelId = process.env.DISCORD_ANNOUNCE_CHANNEL_ID;
 const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildScheduledEvents],
 });
+
+// Daily gut check-in (DMs, component-only). It registers its own listeners and
+// starts its timer on ready; the calendar path above and below is untouched.
+installSurvey(client);
 
 /**
  * Picks the channel to post calendar links in: an explicitly configured
