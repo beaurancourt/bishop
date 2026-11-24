@@ -1,9 +1,9 @@
 /**
- * The eleven fast-path fields of the daily gut check-in, and the one place that
+ * The sixteen fast-path fields of the daily gut check-in, and the one place that
  * knows how a select-menu value becomes a stored answer.
  *
  * The shape here is the storage shape: `answers` is keyed by `FieldKey`, and a
- * value is either a number, a string, or (for the two multi-selects) a string
+ * value is either a number, a string, or (for the multi-selects) a string
  * array. Nothing in this module touches Discord or the filesystem.
  */
 
@@ -21,7 +21,12 @@ export type FieldKey =
   | "foods"
   | "medications"
   | "stress"
-  | "sleep";
+  | "sleep"
+  | "meals"
+  | "caffeine"
+  | "alcohol"
+  | "last_meal"
+  | "spicy";
 
 export type FieldKind = "scale" | "enum" | "bristol" | "multi";
 
@@ -100,13 +105,38 @@ export const MEDICATION_OPTIONS: FieldOption[] = [
   { label: "none", value: NONE },
 ];
 
+/** The three meals and snacks; at least one is picked, so there is no "none". */
+export const MEAL_OPTIONS: FieldOption[] = enumOptions(
+  "breakfast",
+  "lunch",
+  "dinner",
+  "snacks",
+);
+
+/**
+ * Servings stay categorical: "3+" is one bucket, not a number, because the
+ * export groups days by exactly these values.
+ */
+export const SERVING_OPTIONS: FieldOption[] = enumOptions("0", "1", "2", "3+");
+
+/** How close the last meal was to bed; night reflux is why it is asked. */
+export const LAST_MEAL_OPTIONS: FieldOption[] = enumOptions(
+  "more than 3 h",
+  "2–3 h",
+  "within 2 h",
+  "did not eat",
+);
+
 /**
  * Page 1: pain and the two "how much" numbers.
  * Page 2: gut behaviour and the two modifiers of stress.
- * Page 3: the two multi-selects and sleep.
+ * Page 3: the diet questions that have a multi-select, plus sleep.
+ * Page 4: the three "how much / how late" diet buckets and the yes/no.
  *
  * Discord allows five action rows per message and one component per row for a
- * select menu, so a page carries at most four menus plus its button row.
+ * select menu, so a page carries at most four menus plus its button row. The
+ * sixteen fields therefore need four pages; `PAGE_COUNT` follows the assignments
+ * below, and a test asserts the row budget for every page.
  */
 export const FIELDS: FieldDef[] = [
   {
@@ -202,6 +232,46 @@ export const FIELDS: FieldDef[] = [
     kind: "enum",
     page: 3,
     options: enumOptions("<5 h", "5-6 h", "6-7 h", "7-8 h", "8+ h"),
+  },
+  {
+    key: "meals",
+    prompt: "Meals eaten today (choose any)",
+    placeholder: "meals eaten",
+    kind: "multi",
+    page: 3,
+    options: MEAL_OPTIONS,
+  },
+  {
+    key: "caffeine",
+    prompt: "Caffeine servings",
+    placeholder: "caffeine servings",
+    kind: "enum",
+    page: 4,
+    options: SERVING_OPTIONS,
+  },
+  {
+    key: "alcohol",
+    prompt: "Alcohol drinks",
+    placeholder: "alcohol drinks",
+    kind: "enum",
+    page: 4,
+    options: SERVING_OPTIONS,
+  },
+  {
+    key: "last_meal",
+    prompt: "Last meal before bed",
+    placeholder: "last meal before bed",
+    kind: "enum",
+    page: 4,
+    options: LAST_MEAL_OPTIONS,
+  },
+  {
+    key: "spicy",
+    prompt: "Spicy or acidic food",
+    placeholder: "spicy or acidic food",
+    kind: "enum",
+    page: 4,
+    options: enumOptions("yes", "no"),
   },
 ];
 

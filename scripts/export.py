@@ -40,8 +40,20 @@ FIELD_COLUMNS: list[tuple[str, str]] = [
     ("medications", "medications"),
     ("stress", "stress"),
     ("sleep", "sleep"),
+    # Added after the first month of entries; an older line has no answer here
+    # and exports a blank cell, which is what "not asked" looks like.
+    ("meals", "meals"),
+    ("caffeine", "caffeine"),
+    ("alcohol", "alcohol"),
+    ("last_meal", "last_meal"),
+    ("spicy", "spicy"),
 ]
-LIST_FIELDS = {"foods", "medications"}
+LIST_FIELDS = {"foods", "medications", "meals"}
+
+# The daily set's own order, used to lay out the diet counters.
+MEAL_ORDER = ["breakfast", "lunch", "dinner", "snacks"]
+SERVING_ORDER = ["0", "1", "2", "3+"]
+LAST_MEAL_ORDER = ["more than 3 h", "2–3 h", "within 2 h", "did not eat"]
 
 # Display order and labels for the rows of the food table.
 FOOD_GROUPS = [
@@ -176,6 +188,41 @@ def describe(values: list[float]) -> str:
     return f"median {statistics.median(values):g}, mean {statistics.mean(values):.1f} (n={len(values)})"
 
 
+def value_counter(entries: list[dict], key: str) -> Counter:
+    """Counts the days each stored value appeared for one single-select field."""
+    return Counter(
+        str(value)
+        for value in (entry.get("answers", {}).get(key) for entry in entries)
+        if value is not None
+    )
+
+
+def list_counter(entries: list[dict], key: str) -> tuple[Counter, int]:
+    """Counts list answers by item, and how many days answered at all."""
+    counts: Counter = Counter()
+    answered = 0
+    for entry in entries:
+        values = entry.get("answers", {}).get(key)
+        if not isinstance(values, list):
+            continue
+        answered += 1
+        for item in values:
+            if item != "none":
+                counts[str(item)] += 1
+    return counts, answered
+
+
+def bucket_days(counts: Counter, order: list[str]) -> str:
+    """`0 on 5 days, 1 on 8 days`: a category and the days it appeared."""
+    if not counts:
+        return "none recorded"
+    keys = [key for key in order if key in counts]
+    keys += sorted(key for key in counts if key not in order)
+    return ", ".join(
+        f"{key} on {counts[key]} {'day' if counts[key] == 1 else 'days'}" for key in keys
+    )
+
+
 def elapsed_days(first: date, last: date, today: date) -> int:
     if today < first:
         return 0
@@ -258,6 +305,53 @@ def write_markdown(entries: list[dict], month: date, stream) -> None:
         write("- Upper GI: " + ", ".join(f"{key} {count}" for key, count in sorted(upper.items())) + "\n")
     if sleep:
         write("- Sleep: " + ", ".join(f"{key} {count}" for key, count in sleep.most_common()) + "\n")
+    write("\n")
+
+    # --- diet ----------------------------------------------------------------
+    # The diet fields arrived after the first entries, so every count here has
+    # to tolerate a month of lines that never answered them: no key is not a
+    # zero, and a mean with no denominator is a dash.
+    meals, meal_days = list_counter(entries, "meals")
+    caffeine = value_counter(entries, "caffeine")
+    alcohol = value_counter(entries, "alcohol")
+    last_meal = value_counter(entries, "last_meal")
+    spicy = value_counter(entries, "spicy")
+
+    def exposed(key: str, values: set[str]) -> list[dict]:
+        return [
+            entry
+            for entry in entries
+            if str(entry.get("answers", {}).get(key)) in values
+        ]
+
+    def exposure_row(label: str, selected: list[dict]) -> str:
+        pains = numeric(entry.get("answers", {}).get("worst_pain") for entry in selected)
+        mean = f"{statistics.mean(pains):.1f} (n={len(pains)})" if pains else "—"
+        return f"| {label} | {len(selected)} | {mean} |\n"
+
+    write("## Diet\n\n")
+    if meal_days:
+        write(
+            "- Meals eaten: "
+            + ", ".join(f"{meal} {meals[meal]}" for meal in MEAL_ORDER)
+            + f" (of {meal_days} {'day' if meal_days == 1 else 'days'} with an answer)\n"
+        )
+    else:
+        write("- Meals eaten: none recorded\n")
+    write(f"- Caffeine servings: {bucket_days(caffeine, SERVING_ORDER)}\n")
+    write(f"- Alcohol drinks: {bucket_days(alcohol, SERVING_ORDER)}\n")
+    write(f"- Last meal before bed: {bucket_days(last_meal, LAST_MEAL_ORDER)}\n")
+    write(f"- Spicy or acidic: {bucket_days(spicy, ['yes', 'no'])}\n")
+    write(
+        "\nDays each exposure occurred, and the mean worst pain on those days. "
+        "A field a day did not answer is left out, never counted as zero.\n\n"
+    )
+    write("| exposure | days | mean worst pain |\n")
+    write("| --- | --- | --- |\n")
+    write(exposure_row("caffeine (1+)", exposed("caffeine", {"1", "2", "3+"})))
+    write(exposure_row("alcohol (1+)", exposed("alcohol", {"1", "2", "3+"})))
+    write(exposure_row("spicy or acidic", exposed("spicy", {"yes"})))
+    write(exposure_row("last meal within 2 h", exposed("last_meal", {"within 2 h"})))
     write("\n")
 
     # --- red flags -----------------------------------------------------------

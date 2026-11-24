@@ -29,6 +29,11 @@ function fullAnswers(): Answers {
     medications: ["PPI"],
     stress: 1,
     sleep: "7-8 h",
+    meals: ["breakfast", "dinner"],
+    caffeine: "2",
+    alcohol: "0",
+    last_meal: "2–3 h",
+    spicy: "yes",
   };
 }
 
@@ -166,7 +171,7 @@ test("the Next button is acknowledged before the draft file is written", async (
   assert.deepEqual(click.events, ["deferUpdate", "editReply"], "ack, then edit; never a bare update");
   assert.equal(fileAtAck, false, "no file work may happen before the acknowledgement");
   assert.equal(existsSync(draftsFile()), true, "the page change is on disk");
-  assert.match(String(click.edits.at(-1)?.content), /Page 2 of 3/);
+  assert.match(String(click.edits.at(-1)?.content), /Page 2 of 4/);
 });
 
 test("an expired click gets a sentence instead of a 10062", async (t) => {
@@ -218,19 +223,7 @@ test("Submit acknowledges before the entry is written, then forgets the draft", 
   const dir = await workspace(t);
   process.env.SURVEY_USER_IDS = USER;
   const draft = drafts.ensure(USER, DATE, "2026-11-23T02:00:00.000Z");
-  draft.answers = {
-    worst_pain: 7,
-    bloating: 3,
-    upper_gi: "mild",
-    bowel_movements: 2,
-    bristol: "4",
-    urgency: "no",
-    woke_at_night: "no",
-    foods: ["dairy"],
-    medications: ["PPI"],
-    stress: 1,
-    sleep: "7-8 h",
-  };
+  draft.answers = fullAnswers();
   await drafts.persist();
 
   let entryAtAck: boolean | null = null;
@@ -256,6 +249,28 @@ test("Submit acknowledges before the entry is written, then forgets the draft", 
   assert.equal(onDisk.includes(USER), false, "a submitted evening is not a draft");
 });
 
+test("the diet answers round-trip into the submitted entry", async (t) => {
+  const dir = await workspace(t);
+  process.env.SURVEY_USER_IDS = USER;
+  const draft = drafts.ensure(USER, DATE, STARTED_AT);
+  draft.answers = fullAnswers();
+  await drafts.persist();
+
+  const click = fakeInteraction({ customId: `survey:${DATE}:submit`, isButton: true });
+  await handleInteraction(click.interaction);
+
+  const stored = JSON.parse((await monthLines(dir))[0]) as { answers: Answers };
+  assert.deepEqual(stored.answers.meals, ["breakfast", "dinner"]);
+  assert.equal(stored.answers.caffeine, "2");
+  assert.equal(stored.answers.alcohol, "0");
+  assert.equal(stored.answers.last_meal, "2–3 h");
+  assert.equal(stored.answers.spicy, "yes");
+  // The fields that were there before keep their ids and their stored values.
+  assert.equal(stored.answers.worst_pain, 7);
+  assert.deepEqual(stored.answers.foods, ["dairy"]);
+  assert.equal(stored.answers.bristol, "4");
+});
+
 test("a restart between the prompt and Next keeps the earlier answers", async (t) => {
   await workspace(t);
   process.env.SURVEY_USER_IDS = USER;
@@ -276,7 +291,7 @@ test("a restart between the prompt and Next keeps the earlier answers", async (t
   await handleInteraction(next.interaction);
 
   assert.deepEqual(next.events, ["deferUpdate", "editReply"]);
-  assert.match(String(next.edits.at(-1)?.content), /answered 1 of 11/);
+  assert.match(String(next.edits.at(-1)?.content), /answered 1 of 16/);
 });
 
 test("a select menu answer is acknowledged before it is stored", async (t) => {
@@ -295,7 +310,7 @@ test("a select menu answer is acknowledged before it is stored", async (t) => {
 
   assert.deepEqual(click.events, ["deferUpdate", "editReply"]);
   assert.equal(fileAtAck, false);
-  assert.match(String(click.edits.at(-1)?.content), /answered 1 of 11/);
+  assert.match(String(click.edits.at(-1)?.content), /answered 1 of 16/);
   assert.equal(drafts.get(USER, DATE)?.answers.worst_pain, 7);
   assert.equal(existsSync(join(dir, "drafts.json")), true);
 });
@@ -325,8 +340,8 @@ test("the confirmation keeps Add notes and Edit tonight, and a resubmit replaces
   // Edit tonight reopens page one on the entry that was just stored.
   const edit = fakeInteraction({ customId: `survey:${DATE}:edit`, isButton: true });
   await handleInteraction(edit.interaction);
-  assert.match(String(edit.edits.at(-1)?.content), /Page 1 of 3/);
-  assert.match(String(edit.edits.at(-1)?.content), /answered 11 of 11/);
+  assert.match(String(edit.edits.at(-1)?.content), /Page 1 of 4/);
+  assert.match(String(edit.edits.at(-1)?.content), /answered 16 of 16/);
   assert.equal(drafts.get(USER, DATE)?.answers.worst_pain, 7, "the stored answers came back");
 
   // One answer changes, then Submit again.
@@ -424,8 +439,8 @@ test("a restart between Submit and the confirmation buttons does not break them"
 
   const edit = fakeInteraction({ customId: `survey:${DATE}:edit`, isButton: true });
   await handleInteraction(edit.interaction);
-  assert.match(String(edit.edits.at(-1)?.content), /Page 1 of 3/);
-  assert.match(String(edit.edits.at(-1)?.content), /answered 11 of 11/);
+  assert.match(String(edit.edits.at(-1)?.content), /Page 1 of 4/);
+  assert.match(String(edit.edits.at(-1)?.content), /answered 16 of 16/);
   assert.equal(drafts.get(USER, DATE)?.answers.bloating, 3);
 
   const again = fakeInteraction({ customId: `survey:${DATE}:submit`, isButton: true });

@@ -42,18 +42,23 @@ function componentsOf(message: ReturnType<typeof buildSurveyMessage>): RawCompon
 const rowsOf = (message: ReturnType<typeof buildSurveyMessage>) =>
   message.components as unknown as RawComponent[];
 
-test("the eleven fast-path fields are all present and none is repeated", () => {
-  assert.equal(FIELDS.length, 11);
-  assert.equal(new Set(FIELD_KEYS).size, 11);
+test("the sixteen fast-path fields are all present and none is repeated", () => {
+  assert.equal(FIELDS.length, 16);
+  assert.equal(new Set(FIELD_KEYS).size, 16);
   assert.deepEqual(
     [...FIELD_KEYS].sort(),
     [
+      "alcohol",
       "bloating",
       "bowel_movements",
       "bristol",
+      "caffeine",
       "foods",
+      "last_meal",
+      "meals",
       "medications",
       "sleep",
+      "spicy",
       "stress",
       "upper_gi",
       "urgency",
@@ -64,20 +69,24 @@ test("the eleven fast-path fields are all present and none is repeated", () => {
 });
 
 test("every page fits Discord's five action rows and five components per row", () => {
-  assert.equal(PAGE_COUNT, 3);
+  assert.equal(PAGE_COUNT, 4);
   const seen = new Set<string>();
   for (let page = 1; page <= PAGE_COUNT; page += 1) {
     const message = buildSurveyMessage(DATE, {}, page);
     const rows = rowsOf(message);
+    const fields = fieldsOnPage(page);
+    // One row per select, plus the single button row this page adds.
+    assert.equal(rows.length, fields.length + 1, `page ${page} rows`);
     assert.ok(rows.length <= 5, `page ${page} has ${rows.length} rows`);
+    assert.ok(fields.length <= 4, `page ${page} has ${fields.length} selects`);
     for (const row of rows) {
       assert.equal(row.type, 1);
       assert.ok((row.components ?? []).length >= 1);
       assert.ok((row.components ?? []).length <= 5);
     }
-    for (const field of fieldsOnPage(page)) seen.add(field.key);
+    for (const field of fields) seen.add(field.key);
   }
-  assert.equal(seen.size, 11);
+  assert.equal(seen.size, 16);
 });
 
 test("each select's custom id carries the date and the field, and parses back", () => {
@@ -205,9 +214,38 @@ test("bristol keeps none apart from the 1-7 scale", () => {
   assert.equal(applyAnswer({}, "bristol", ["none"]).bristol, "none");
 });
 
+test("the diet questions store exactly the spec's answer values", () => {
+  const values = (key: string) =>
+    FIELDS.find((field) => field.key === key)?.options.map((option) => option.value);
+  assert.deepEqual(values("meals"), ["breakfast", "lunch", "dinner", "snacks"]);
+  assert.deepEqual(values("caffeine"), ["0", "1", "2", "3+"]);
+  assert.deepEqual(values("alcohol"), ["0", "1", "2", "3+"]);
+  assert.deepEqual(values("last_meal"), ["more than 3 h", "2–3 h", "within 2 h", "did not eat"]);
+  assert.deepEqual(values("spicy"), ["yes", "no"]);
+
+  let answers = applyAnswer({}, "meals", ["breakfast", "dinner"]);
+  assert.deepEqual(answers.meals, ["breakfast", "dinner"]);
+  answers = applyAnswer(answers, "caffeine", ["3+"]);
+  answers = applyAnswer(answers, "alcohol", ["0"]);
+  answers = applyAnswer(answers, "last_meal", ["2–3 h"]);
+  answers = applyAnswer(answers, "spicy", ["yes"]);
+  assert.equal(answers.caffeine, "3+");
+  assert.equal(answers.alcohol, "0");
+  assert.equal(answers.last_meal, "2–3 h");
+  assert.equal(answers.spicy, "yes");
+
+  // They are spread over pages three and four, inside the row budget.
+  assert.equal(FIELDS.find((field) => field.key === "meals")?.page, 3);
+  for (const key of ["caffeine", "alcohol", "last_meal", "spicy"]) {
+    assert.equal(FIELDS.find((field) => field.key === key)?.page, 4);
+  }
+  // The counter copy reports the new total, not the old eleven.
+  assert.match(buildSurveyMessage(DATE, {}, 1).content, /answered 0 of 16/);
+});
+
 test("a submission missing fields is named, not written", () => {
   const answers = applyAnswer({}, "worst_pain", ["3"]);
-  assert.equal(missingFields(answers).length, 10);
+  assert.equal(missingFields(answers).length, 15);
   const notice = missingFieldsNotice(answers);
   assert.ok(notice?.includes("Bloating"));
   assert.ok(!notice?.includes("Worst abdominal pain"));

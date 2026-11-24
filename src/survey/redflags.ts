@@ -2,7 +2,7 @@
  * The red-flag list from the spec, turned into detection over what she typed in
  * the notes box, plus the one piece of copy the bot must never soften.
  *
- * The fast path is eleven fixed selects, so there is no yes/no field for each
+ * The fast path is a fixed set of selects, so there is no yes/no field for each
  * alarm symptom: the notes modal asks "anything from the red-flag list today"
  * and this module reads that answer. Any positive mention fires the flag; the
  * flag keys are what gets written to JSONL, the labels are what a person reads.

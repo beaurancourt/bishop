@@ -61,7 +61,7 @@ links in the configured channel (or the system channel by default).
 
 ## Daily gut check-in
 
-A 21:00 DM diary for a GI clinic: eleven select menus, one **Notes** modal, no
+A 21:00 DM diary for a GI clinic: sixteen select menus, one **Notes** modal, no
 typed commands and no privileged intents. It is a separate feature from the
 calendar path and does not read or write anything the calendar path uses.
 
@@ -94,9 +94,14 @@ confirmation keeps **Add notes** and **Edit tonight**: both rebuild that date's
 draft from the stored entry, so they still work after a restart, and a resubmit
 corrects the one line.
 
-`answers` has the eleven fields: `worst_pain`, `bloating`, `upper_gi`,
+`answers` has the sixteen fields: `worst_pain`, `bloating`, `upper_gi`,
 `bowel_movements` (4 means "4 or more"), `bristol` (1-7 or `"none"`), `urgency`,
-`woke_at_night`, `foods`, `medications`, `stress`, `sleep`.
+`woke_at_night`, `foods`, `medications`, `stress`, `sleep`, `meals` (a list),
+`caffeine`, `alcohol`, `last_meal`, `spicy`. The last five arrived after the
+first entries; a line without them exports a blank cell, not a zero.
+
+The sixteen selects are split over four pages, at most four per page plus the
+page's button row, which is Discord's five-row limit per message.
 
 Red flags are detected from the notes box (the alarm list in the spec has no
 yes/no field in the fast path). When one fires, the confirmation says to contact
@@ -114,8 +119,8 @@ python3 scripts/export.py --month 2026-11 --format md --out ~/Desktop/gut.md
 Reads `data/survey/2026-11.jsonl` and prints to stdout, or writes the path you
 give. It refuses a path inside this repository — the CSV leaves the checkout by
 hand. The Markdown summary reports adherence, severity medians, the Bristol
-distribution, and for each food group the days eaten with the mean next-day pain
-and that mean's denominator (`n`).
+distribution, the diet counts, and for each food group the days eaten with the
+mean next-day pain and that mean's denominator (`n`).
 
 ### Scheduling and safety notes
 

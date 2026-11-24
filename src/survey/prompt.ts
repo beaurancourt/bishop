@@ -1,5 +1,5 @@
 /**
- * Everything the check-in says in Discord: the eleven selects, the page buttons,
+ * Everything the check-in says in Discord: the sixteen selects, the page buttons,
  * the notes modal, the intro, and the control acks. Plain data only, so the
  * builder can be unit-tested without a client or a gateway.
  *
@@ -191,7 +191,7 @@ export function buildSurveyMessage(date: string, answers: Answers, page = 1): Su
 
   if (page === 1) {
     content.push(
-      "Eleven taps, then **Notes** if you want to add anything. This is a diary for your clinic, not medical advice.",
+      `${FIELDS.length} taps, then **Notes** if you want to add anything. This is a diary for your clinic, not medical advice.`,
       "",
     );
   }
@@ -199,7 +199,7 @@ export function buildSurveyMessage(date: string, answers: Answers, page = 1): Su
     `Page ${page} of ${PAGE_COUNT} · answered ${answeredCount(answers)} of ${FIELDS.length}.`,
   );
   if (page === PAGE_COUNT) {
-    content.push("When all eleven are in, put anything else in **Notes**, then press **Submit**.");
+    content.push(`When all ${FIELDS.length} are in, put anything else in **Notes**, then press **Submit**.`);
   }
 
   const components: APIActionRowComponent<APIComponentInMessageActionRow>[] = fields.map((field) =>
@@ -229,7 +229,7 @@ export function summarise(answers: Answers): string {
 export const INTRO_COPY = [
   "👋 **A month of gut check-ins.**",
   "",
-  "From tonight I will send a short check-in at 21:00 each day: eleven taps about today, then a **Notes** button for anything else — food, timing, stool colour, mucus, or anything from the red-flag list.",
+  `From tonight I will send a short check-in at 21:00 each day: ${FIELDS.length} taps about today, then a **Notes** button for anything else — food, timing, stool colour, mucus, or anything from the red-flag list.`,
   "",
   "Each entry is one line in a file on pop. Nobody else reads it; you hand the export to your clinic when you are ready. Recording a day is optional — a skipped day is recorded as skipped, never as zero.",
   "",
