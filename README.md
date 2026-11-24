@@ -61,7 +61,7 @@ links in the configured channel (or the system channel by default).
 
 ## Daily gut check-in
 
-A 21:00 DM diary for a GI clinic: sixteen select menus, one **Notes** modal, no
+A 21:00 DM diary for a GI clinic: eighteen select menus, one **Notes** modal, no
 typed commands and no privileged intents. It is a separate feature from the
 calendar path and does not read or write anything the calendar path uses.
 
@@ -94,20 +94,24 @@ confirmation keeps **Add notes** and **Edit tonight**: both rebuild that date's
 draft from the stored entry, so they still work after a restart, and a resubmit
 corrects the one line.
 
-`answers` has the sixteen fields: `worst_pain`, `bloating`, `upper_gi`,
+`answers` has the eighteen fields: `worst_pain`, `bloating`, `upper_gi`,
+`pain_location` (none / upper middle / upper right / around the navel / lower
+right / lower left / all over), `other_symptoms` (a list: nausea, vomiting, cold
+sweats, cramping, fatigue, headache, dizziness, fever, mucus in stool), then
 `bowel_movements` (4 means "4 or more"), `bristol` (1-7 or `"none"`), `urgency`,
 `woke_at_night`, `foods`, `medications`, `stress`, `sleep`, `meals` (a list),
-`caffeine`, `alcohol`, `last_meal`, `spicy`. The last five arrived after the
-first entries; a line without them exports a blank cell, not a zero.
+`caffeine`, `alcohol`, `last_meal`, `spicy`. Diet, pain location and symptoms
+arrived after the first entries; a line without them exports a blank cell, not a
+zero.
 
-The sixteen selects are split over four pages, at most four per page plus the
+The eighteen selects are split over five pages, at most four per page plus the
 page's button row, which is Discord's five-row limit per message.
 
 Red flags are detected from the notes box (the alarm list in the spec has no
 yes/no field in the fast path). When one fires, the confirmation says to contact
 the doctor today and to seek urgent care for vomiting blood, black stools,
-fainting or severe chest pain. It never reassures. The keys that fired are
-stored in `red_flags`.
+fainting, severe chest pain, or cold sweats with chest or upper-abdominal pain.
+It never reassures. The keys that fired are stored in `red_flags`.
 
 ### Export
 

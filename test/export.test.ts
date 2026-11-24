@@ -42,6 +42,8 @@ const entry = (date: string, answers: Record<string, unknown>, extra: Record<str
     alcohol: "0",
     last_meal: "2–3 h",
     spicy: "yes",
+    pain_location: "upper right",
+    other_symptoms: ["nausea", "cold sweats"],
     ...answers,
   },
   notes: { other: "", red_flags_note: "" },
@@ -106,6 +108,8 @@ skipUnlessPython("the CSV has one column per field plus notes and flags", async 
     "alcohol",
     "last_meal",
     "spicy",
+    "pain_location",
+    "other_symptoms",
     "notes_other",
     "notes_red_flags",
     "red_flags",
@@ -116,6 +120,8 @@ skipUnlessPython("the CSV has one column per field plus notes and flags", async 
   assert.match(lines[2], /vomiting blood, black or tarry stools, or blood in stool/);
   assert.match(lines[3], /dairy; caffeine/);
   assert.match(lines[3], /,none,/, "bristol none survives as its own value");
+  assert.match(lines[1], /upper right/, "the pain location is its own column");
+  assert.match(lines[1], /nausea; cold sweats/, "a symptom list is joined like the other lists");
 });
 
 skipUnlessPython("the Markdown summary carries adherence, medians, Bristol and food denominators", async (t) => {
@@ -194,7 +200,15 @@ skipUnlessPython("an entry from before the diet fields exports blanks, not zeros
   const [header, first] = csv.stdout.trim().split("\n");
   const columns = header.split(",");
   const cells = first.split(",");
-  for (const key of ["meals", "caffeine", "alcohol", "last_meal", "spicy"]) {
+  for (const key of [
+    "meals",
+    "caffeine",
+    "alcohol",
+    "last_meal",
+    "spicy",
+    "pain_location",
+    "other_symptoms",
+  ]) {
     assert.equal(cells[columns.indexOf(key)], "", `${key} is blank when it was never asked`);
   }
 

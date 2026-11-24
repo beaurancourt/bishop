@@ -6,6 +6,7 @@ import {
   FIELD_KEYS,
   PAGE_COUNT,
   applyAnswer,
+  fieldByKey,
   fieldsOnPage,
   missingFields,
   selectedValues,
@@ -42,9 +43,9 @@ function componentsOf(message: ReturnType<typeof buildSurveyMessage>): RawCompon
 const rowsOf = (message: ReturnType<typeof buildSurveyMessage>) =>
   message.components as unknown as RawComponent[];
 
-test("the sixteen fast-path fields are all present and none is repeated", () => {
-  assert.equal(FIELDS.length, 16);
-  assert.equal(new Set(FIELD_KEYS).size, 16);
+test("the eighteen fast-path fields are all present and none is repeated", () => {
+  assert.equal(FIELDS.length, 18);
+  assert.equal(new Set(FIELD_KEYS).size, 18);
   assert.deepEqual(
     [...FIELD_KEYS].sort(),
     [
@@ -57,6 +58,8 @@ test("the sixteen fast-path fields are all present and none is repeated", () => 
       "last_meal",
       "meals",
       "medications",
+      "other_symptoms",
+      "pain_location",
       "sleep",
       "spicy",
       "stress",
@@ -69,7 +72,7 @@ test("the sixteen fast-path fields are all present and none is repeated", () => 
 });
 
 test("every page fits Discord's five action rows and five components per row", () => {
-  assert.equal(PAGE_COUNT, 4);
+  assert.equal(PAGE_COUNT, 5);
   const seen = new Set<string>();
   for (let page = 1; page <= PAGE_COUNT; page += 1) {
     const message = buildSurveyMessage(DATE, {}, page);
@@ -86,7 +89,7 @@ test("every page fits Discord's five action rows and five components per row", (
     }
     for (const field of fields) seen.add(field.key);
   }
-  assert.equal(seen.size, 16);
+  assert.equal(seen.size, 18);
 });
 
 test("each select's custom id carries the date and the field, and parses back", () => {
@@ -200,7 +203,7 @@ test("none never coexists with a real item in a multi-select", () => {
   assert.deepEqual(answers.foods, ["none"]);
   answers = applyAnswer(answers, "foods", ["dairy", "caffeine"]);
   assert.deepEqual(answers.foods, ["dairy", "caffeine"]);
-  assert.deepEqual(selectedValues(FIELDS[8], answers.foods), ["dairy", "caffeine"]);
+  assert.deepEqual(selectedValues(fieldByKey("foods")!, answers.foods), ["dairy", "caffeine"]);
 });
 
 test("a value outside the menu is refused rather than stored", () => {
@@ -235,17 +238,64 @@ test("the diet questions store exactly the spec's answer values", () => {
   assert.equal(answers.spicy, "yes");
 
   // They are spread over pages three and four, inside the row budget.
-  assert.equal(FIELDS.find((field) => field.key === "meals")?.page, 3);
-  for (const key of ["caffeine", "alcohol", "last_meal", "spicy"]) {
+  for (const key of ["meals", "caffeine", "alcohol"]) {
     assert.equal(FIELDS.find((field) => field.key === key)?.page, 4);
   }
-  // The counter copy reports the new total, not the old eleven.
-  assert.match(buildSurveyMessage(DATE, {}, 1).content, /answered 0 of 16/);
+  for (const key of ["last_meal", "spicy"]) {
+    assert.equal(FIELDS.find((field) => field.key === key)?.page, 5);
+  }
+  // The counter copy reports the new total, not the old sixteen.
+  assert.match(buildSurveyMessage(DATE, {}, 1).content, /answered 0 of 18/);
+});
+
+test("the symptom fields store exactly the spec's answer values", () => {
+  const values = (key: string) =>
+    fieldByKey(key)?.options.map((option) => option.value);
+  assert.deepEqual(values("pain_location"), [
+    "none",
+    "upper middle",
+    "upper right",
+    "around the navel",
+    "lower right",
+    "lower left",
+    "all over",
+  ]);
+  assert.deepEqual(values("other_symptoms"), [
+    "nausea",
+    "vomiting",
+    "cold sweats",
+    "cramping",
+    "fatigue",
+    "headache",
+    "dizziness",
+    "fever",
+    "mucus in stool",
+    "none",
+  ]);
+
+  let answers = applyAnswer({}, "pain_location", ["upper right"]);
+  assert.equal(answers.pain_location, "upper right");
+  answers = applyAnswer(answers, "pain_location", ["none"]);
+  assert.equal(answers.pain_location, "none");
+
+  answers = applyAnswer(answers, "other_symptoms", ["nausea", "cold sweats"]);
+  assert.deepEqual(answers.other_symptoms, ["nausea", "cold sweats"]);
+  answers = applyAnswer(answers, "other_symptoms", ["none"]);
+  assert.deepEqual(answers.other_symptoms, ["none"]);
+
+  assert.equal(fieldByKey("pain_location")?.kind, "enum");
+  assert.equal(fieldByKey("other_symptoms")?.kind, "multi");
+  // Both fit beside two other menus on page two, inside the row budget.
+  assert.equal(fieldsOnPage(2).length, 4);
+  assert.deepEqual(
+    fieldsOnPage(2).map((field) => field.key),
+    ["pain_location", "other_symptoms", "bristol", "urgency"],
+  );
 });
 
 test("a submission missing fields is named, not written", () => {
   const answers = applyAnswer({}, "worst_pain", ["3"]);
-  assert.equal(missingFields(answers).length, 15);
+  assert.equal(missingFields(answers).length, 17);
   const notice = missingFieldsNotice(answers);
   assert.ok(notice?.includes("Bloating"));
   assert.ok(!notice?.includes("Worst abdominal pain"));

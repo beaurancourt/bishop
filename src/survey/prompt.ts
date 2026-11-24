@@ -1,5 +1,5 @@
 /**
- * Everything the check-in says in Discord: the sixteen selects, the page buttons,
+ * Everything the check-in says in Discord: the eighteen selects, the page buttons,
  * the notes modal, the intro, and the control acks. Plain data only, so the
  * builder can be unit-tested without a client or a gateway.
  *
@@ -233,7 +233,7 @@ export const INTRO_COPY = [
   "",
   "Each entry is one line in a file on pop. Nobody else reads it; you hand the export to your clinic when you are ready. Recording a day is optional — a skipped day is recorded as skipped, never as zero.",
   "",
-  "This is **not medical advice**. It cannot diagnose anything, and it will never tell you a symptom is fine. If you report a red flag, it will tell you to contact your doctor today, and to seek urgent care for vomiting blood, black stools, fainting, or severe chest pain.",
+  "This is **not medical advice**. It cannot diagnose anything, and it will never tell you a symptom is fine. If you report a red flag, it will tell you to contact your doctor today, and to seek urgent care for vomiting blood, black stools, fainting, severe chest pain, or cold sweats with chest or upper-abdominal pain.",
   "",
   "**Pause** stops the nightly check-in. **Delete my data** removes every entry bishop holds for you.",
 ].join("\n");

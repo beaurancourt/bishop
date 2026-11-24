@@ -61,6 +61,7 @@ test("the confirmation tells her to call today and never reassures", () => {
   assert.match(message!, /black or tarry stools/i);
   assert.match(message!, /fainted/i);
   assert.match(message!, /severe chest pain/i);
+  assert.match(message!, /cold sweats with chest or upper-abdominal pain/i);
   assert.match(message!, /not medical advice/i);
   assert.match(message!, new RegExp(redFlagLabel("gi_bleeding").slice(0, 20)));
   for (const reassurance of [

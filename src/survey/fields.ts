@@ -1,5 +1,5 @@
 /**
- * The sixteen fast-path fields of the daily gut check-in, and the one place that
+ * The eighteen fast-path fields of the daily gut check-in, and the one place that
  * knows how a select-menu value becomes a stored answer.
  *
  * The shape here is the storage shape: `answers` is keyed by `FieldKey`, and a
@@ -14,6 +14,8 @@ export type FieldKey =
   | "worst_pain"
   | "bloating"
   | "upper_gi"
+  | "pain_location"
+  | "other_symptoms"
   | "bowel_movements"
   | "bristol"
   | "urgency"
@@ -128,14 +130,44 @@ export const LAST_MEAL_OPTIONS: FieldOption[] = enumOptions(
 );
 
 /**
- * Page 1: pain and the two "how much" numbers.
- * Page 2: gut behaviour and the two modifiers of stress.
- * Page 3: the diet questions that have a multi-select, plus sleep.
- * Page 4: the three "how much / how late" diet buckets and the yes/no.
+ * Where the pain sat, in the words a clinic uses. The quadrant matters: right
+ * upper points at the gallbladder, epigastric at gastritis, right lower at the
+ * appendix, left lower at the colon.
+ */
+export const PAIN_LOCATION_OPTIONS: FieldOption[] = enumOptions(
+  "none",
+  "upper middle",
+  "upper right",
+  "around the navel",
+  "lower right",
+  "lower left",
+  "all over",
+);
+
+/** Everything else that happened today; the diary asks it as one list. */
+export const SYMPTOM_OPTIONS: FieldOption[] = enumOptions(
+  "nausea",
+  "vomiting",
+  "cold sweats",
+  "cramping",
+  "fatigue",
+  "headache",
+  "dizziness",
+  "fever",
+  "mucus in stool",
+  "none",
+);
+
+/**
+ * Page 1: pain severity and the two "how much" numbers.
+ * Page 2: where the pain was, the symptom list, and gut behaviour.
+ * Page 3: the night question, stress, and the two diet multi-selects.
+ * Page 4: sleep, the meals, and the drink buckets.
+ * Page 5: the two "how late / what kind" diet questions.
  *
  * Discord allows five action rows per message and one component per row for a
  * select menu, so a page carries at most four menus plus its button row. The
- * sixteen fields therefore need four pages; `PAGE_COUNT` follows the assignments
+ * eighteen fields therefore need five pages; `PAGE_COUNT` follows the assignments
  * below, and a test asserts the row budget for every page.
  */
 export const FIELDS: FieldDef[] = [
@@ -162,6 +194,22 @@ export const FIELDS: FieldDef[] = [
     kind: "enum",
     page: 1,
     options: enumOptions("none", "mild", "moderate", "severe"),
+  },
+  {
+    key: "pain_location",
+    prompt: "Where the pain was",
+    placeholder: "where the pain was",
+    kind: "enum",
+    page: 2,
+    options: PAIN_LOCATION_OPTIONS,
+  },
+  {
+    key: "other_symptoms",
+    prompt: "Other symptoms today (choose any)",
+    placeholder: "other symptoms",
+    kind: "multi",
+    page: 2,
+    options: SYMPTOM_OPTIONS,
   },
   {
     key: "bowel_movements",
@@ -198,7 +246,7 @@ export const FIELDS: FieldDef[] = [
     prompt: "Did symptoms wake you?",
     placeholder: "symptoms woke you",
     kind: "enum",
-    page: 2,
+    page: 3,
     options: enumOptions("yes", "no"),
   },
   {
@@ -206,7 +254,7 @@ export const FIELDS: FieldDef[] = [
     prompt: "Stress today",
     placeholder: "stress (0 = none, 4 = extreme)",
     kind: "scale",
-    page: 2,
+    page: 3,
     options: scale(0, 4),
   },
   {
@@ -230,7 +278,7 @@ export const FIELDS: FieldDef[] = [
     prompt: "Sleep last night",
     placeholder: "hours slept",
     kind: "enum",
-    page: 3,
+    page: 4,
     options: enumOptions("<5 h", "5-6 h", "6-7 h", "7-8 h", "8+ h"),
   },
   {
@@ -238,7 +286,7 @@ export const FIELDS: FieldDef[] = [
     prompt: "Meals eaten today (choose any)",
     placeholder: "meals eaten",
     kind: "multi",
-    page: 3,
+    page: 4,
     options: MEAL_OPTIONS,
   },
   {
@@ -262,7 +310,7 @@ export const FIELDS: FieldDef[] = [
     prompt: "Last meal before bed",
     placeholder: "last meal before bed",
     kind: "enum",
-    page: 4,
+    page: 5,
     options: LAST_MEAL_OPTIONS,
   },
   {
@@ -270,7 +318,7 @@ export const FIELDS: FieldDef[] = [
     prompt: "Spicy or acidic food",
     placeholder: "spicy or acidic food",
     kind: "enum",
-    page: 4,
+    page: 5,
     options: enumOptions("yes", "no"),
   },
 ];

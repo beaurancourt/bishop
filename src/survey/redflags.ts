@@ -148,7 +148,7 @@ export function redFlagMessage(flagKeys: string[]): string | null {
   return [
     "⚠️ **Please contact your doctor today.**",
     `You reported: ${labels.join("; ")}. That is on the list that needs a person, not a diary.`,
-    "If you have vomited blood, have black or tarry stools, have fainted, or have severe chest pain, **seek urgent care now** — call 911 or go to an emergency department. Do not wait for the morning.",
+    "If you have vomited blood, have black or tarry stools, have fainted, have severe chest pain, or have cold sweats with chest or upper-abdominal pain, **seek urgent care now** — call 911 or go to an emergency department. Do not wait for the morning.",
     "This is a diary, not medical advice. bishop cannot tell you what is wrong, and writing it down does not replace being seen.",
   ].join("\n\n");
 }

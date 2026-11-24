@@ -47,8 +47,12 @@ FIELD_COLUMNS: list[tuple[str, str]] = [
     ("alcohol", "alcohol"),
     ("last_meal", "last_meal"),
     ("spicy", "spicy"),
+    # Added for the symptom fields; a line recorded before them exports a
+    # blank cell here, which is what "not asked" looks like.
+    ("pain_location", "pain_location"),
+    ("other_symptoms", "other_symptoms"),
 ]
-LIST_FIELDS = {"foods", "medications", "meals"}
+LIST_FIELDS = {"foods", "medications", "meals", "other_symptoms"}
 
 # The daily set's own order, used to lay out the diet counters.
 MEAL_ORDER = ["breakfast", "lunch", "dinner", "snacks"]
