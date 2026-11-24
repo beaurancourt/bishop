@@ -7,15 +7,19 @@
  * after the message was sent and the answer still belongs to that evening.
  */
 import type { APIActionRowComponent, APIComponentInMessageActionRow } from "discord.js";
+import type { SurveyNotes } from "./entry.js";
 import {
   type Answers,
   type FieldDef,
+  type OtherNoteKey,
   PAGE_COUNT,
   answeredCount,
   displayValue,
   FIELDS,
   fieldsOnPage,
+  fieldByKey,
   missingFields,
+  otherNoteKey,
   selectedValues,
 } from "./fields.js";
 
@@ -24,6 +28,14 @@ export const CUSTOM_ID_PREFIX = "survey";
 /** Text inputs in the notes modal. */
 export const NOTES_OTHER_INPUT = "survey-notes-other";
 export const NOTES_FLAGS_INPUT = "survey-notes-flags";
+
+/** Discord's own limit on a short text input; the survey's words fit inside it. */
+export const OTHER_INPUT_MAX = 200;
+
+/** The one text box of the "which other?" modal, named for its select. */
+export function otherInputId(field: string): string {
+  return `survey-other-${field}`;
+}
 
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -34,6 +46,7 @@ export type SurveyCustomId =
   | { kind: "edit"; date: string }
   | { kind: "submit"; date: string }
   | { kind: "notes-modal"; date: string }
+  | { kind: "other-modal"; date: string; field: string }
   | { kind: "pause" }
   | { kind: "resume" }
   | { kind: "delete" }
@@ -46,6 +59,7 @@ export const customIds = {
   edit: (date: string) => `${CUSTOM_ID_PREFIX}:${date}:edit`,
   submit: (date: string) => `${CUSTOM_ID_PREFIX}:${date}:submit`,
   notesModal: (date: string) => `${CUSTOM_ID_PREFIX}:${date}:notes-modal`,
+  otherModal: (date: string, field: string) => `${CUSTOM_ID_PREFIX}:${date}:other-modal:${field}`,
   pause: () => `${CUSTOM_ID_PREFIX}:pause`,
   resume: () => `${CUSTOM_ID_PREFIX}:resume`,
   delete: () => `${CUSTOM_ID_PREFIX}:delete`,
@@ -90,6 +104,11 @@ export function parseCustomId(raw: string): SurveyCustomId | null {
       return { kind: "submit", date };
     case "notes-modal":
       return { kind: "notes-modal", date };
+    case "other-modal": {
+      const field = parts[3];
+      if (!field || !fieldByKey(field)) return null;
+      return { kind: "other-modal", date, field };
+    }
     default:
       return null;
   }
@@ -181,11 +200,28 @@ function buttonRow(
   return { type: 1, components: buttons };
 }
 
+/** What a notes key is called when the prompt echoes back what she typed. */
+export function otherLabel(key: OtherNoteKey): string {
+  return key === "other_meds" ? "Other medication" : "Other food";
+}
+
+/** The page a notes key belongs to: the select whose `other` answer filled it. */
+function otherNotePage(key: OtherNoteKey): number {
+  const field = FIELDS.find((candidate) => otherNoteKey(candidate) === key);
+  return field?.page ?? 1;
+}
+
 /**
  * One page of the check-in. `answers` drives the selected options, so a page
- * re-rendered after a click shows what has already been answered.
+ * re-rendered after a click shows what has already been answered. `notes` adds
+ * the words a select's `other` answer collected, beside the menu that asked.
  */
-export function buildSurveyMessage(date: string, answers: Answers, page = 1): SurveyMessage {
+export function buildSurveyMessage(
+  date: string,
+  answers: Answers,
+  page = 1,
+  notes?: SurveyNotes,
+): SurveyMessage {
   const fields = fieldsOnPage(page);
   const content: string[] = [`🩺 **Gut check-in · ${formatDateLabel(date)}**`, ""];
 
@@ -198,6 +234,10 @@ export function buildSurveyMessage(date: string, answers: Answers, page = 1): Su
   content.push(
     `Page ${page} of ${PAGE_COUNT} · answered ${answeredCount(answers)} of ${FIELDS.length}.`,
   );
+  for (const key of ["other_meds", "other_foods"] as const) {
+    const text = notes?.[key];
+    if (text && otherNotePage(key) === page) content.push(`${otherLabel(key)}: ${text}`);
+  }
   if (page === PAGE_COUNT) {
     content.push(`When all ${FIELDS.length} are in, put anything else in **Notes**, then press **Submit**.`);
   }

@@ -20,6 +20,7 @@ import {
   formatDateLabel,
   introMessage,
   missingFieldsNotice,
+  otherInputId,
   parseCustomId,
 } from "../src/survey/prompt.js";
 
@@ -405,4 +406,32 @@ test("the intro says what is recorded, that it is not advice, and offers both co
 test("the notes modal ids are distinct from the survey ids", () => {
   assert.notEqual(NOTES_OTHER_INPUT, NOTES_FLAGS_INPUT);
   assert.equal(parseCustomId(NOTES_OTHER_INPUT), null);
+});
+
+test("the other modal's id carries the date and the select, and parses back", () => {
+  assert.deepEqual(parseCustomId(customIds.otherModal(DATE, "medications")), {
+    kind: "other-modal",
+    date: DATE,
+    field: "medications",
+  });
+  assert.equal(parseCustomId(customIds.otherModal(DATE, "not_a_field")), null);
+  assert.notEqual(otherInputId("medications"), NOTES_OTHER_INPUT);
+});
+
+test("the prompt echoes what other was beside the menu that asked", () => {
+  const notes = { other: "", red_flags_note: "", other_meds: "ibuprofen" };
+  assert.match(buildSurveyMessage(DATE, {}, 4, notes).content, /Other medication: ibuprofen/);
+  assert.doesNotMatch(
+    buildSurveyMessage(DATE, {}, 1, notes).content,
+    /Other medication/,
+    "the words belong to the medication page, not every page",
+  );
+  assert.doesNotMatch(buildSurveyMessage(DATE, {}, 4).content, /Other medication/);
+});
+
+test("the medication select still offers other, and the food lists do not", () => {
+  const values = (key: string) => fieldByKey(key)?.options.map((option) => option.value) ?? [];
+  assert.ok(values("medications").includes("other"));
+  assert.equal(values("foods_fodmap").includes("other"), false);
+  assert.equal(values("foods_other").includes("other"), false);
 });

@@ -61,9 +61,10 @@ links in the configured channel (or the system channel by default).
 
 ## Daily gut check-in
 
-A 21:00 DM diary for a GI clinic: nineteen select menus, one **Notes** modal, no
-typed commands and no privileged intents. It is a separate feature from the
-calendar path and does not read or write anything the calendar path uses.
+A 21:00 DM diary for a GI clinic: nineteen select menus, a **Notes** modal, and a
+"Which other?" modal for a select answered with `other`; no typed commands and no
+privileged intents. It is a separate feature from the calendar path and does not
+read or write anything the calendar path uses.
 
 Enable it by naming who may be messaged:
 
@@ -113,6 +114,17 @@ their `foods` values in the file: the export maps each value into the list that
 holds it now (`apple/pear/stone fruit` lists under high-FODMAP, `fried/fatty`
 under other) and leaves the other column blank, so an old month still adds up.
 
+The `medications` select offers `other`, and a menu cannot record what that was.
+Picking it stores the answer first, then opens a one-box modal; what she types
+goes in `notes.other_meds`, never in `answers`, so the fixed value `other` is
+what the CSV counts and the export's groups stay stable. The words are trimmed,
+capped at 200 characters, shown on the medication page, and cleared when she
+later picks a named medication instead. Dismissing the modal keeps the answer and
+writes no note. A modal opened from a component keeps that component's message,
+so its submit re-renders the prompt in one response; a modal that did not come
+from one gets an ephemeral sentence instead. The same path covers a food list if
+one ever offers `other` (`notes.other_foods`).
+
 The nineteen selects are split over five pages, at most four per page plus the
 page's button row, which is Discord's five-row limit per message.
 
@@ -131,9 +143,12 @@ python3 scripts/export.py --month 2026-11 --format md --out ~/Desktop/gut.md
 
 Reads `data/survey/2026-11.jsonl` and prints to stdout, or writes the path you
 give. It refuses a path inside this repository — the CSV leaves the checkout by
-hand. The Markdown summary reports adherence, severity medians, the Bristol
-distribution, the diet counts, and for each food group the list it came from, the
-days eaten with the mean next-day pain, and that mean's denominator (`n`).
+hand. The CSV's notes columns are `notes_other`, `notes_other_meds`,
+`notes_other_foods` and `notes_red_flags`; the Markdown mentions the two `other`
+notes only on the days she typed something. The summary reports adherence,
+severity medians, the Bristol distribution, the diet counts, and for each food
+group the list it came from, the days eaten with the mean next-day pain, and that
+mean's denominator (`n`).
 
 ### Scheduling and safety notes
 
@@ -145,6 +160,10 @@ days eaten with the mean next-day pain, and that mean's denominator (`n`).
   slow write cannot push the answer past Discord's three-second window. A click
   that reaches the bot more than 2.5 seconds after it was made is answered with
   "This check-in message has expired — ask for a fresh one" and changes nothing.
+  The one exception is a select answered with `other`: Discord takes one response
+  per interaction and that response is the modal, so the draft is written before
+  the modal opens rather than after an acknowledgement. A restart in the seconds
+  while she types therefore keeps the answer.
 - Half-finished pages are kept in `data/survey/drafts.json` and loaded at
   startup, so a restart mid-evening hands the next click the answers from the
   earlier pages. Drafts are pruned when their evening is no longer today, and

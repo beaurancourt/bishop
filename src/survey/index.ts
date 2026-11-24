@@ -12,6 +12,7 @@ import {
   type Interaction,
   MessageFlags,
   ModalBuilder,
+  type StringSelectMenuInteraction,
   TextInputBuilder,
   TextInputStyle,
 } from "discord.js";
@@ -19,7 +20,14 @@ import { deliverDaily } from "./deliver.js";
 import { type Draft, DraftStore } from "./drafts.js";
 import { isEnrolled, loadEnrollment } from "./enroll.js";
 import { buildEntry, type SurveyNotes, type SurveyEntry } from "./entry.js";
-import { applyAnswer, fieldByKey, PAGE_COUNT } from "./fields.js";
+import {
+  applyAnswer,
+  type FieldDef,
+  fieldByKey,
+  OTHER,
+  otherNoteKey,
+  PAGE_COUNT,
+} from "./fields.js";
 import {
   buildSurveyMessage,
   confirmationRow,
@@ -30,6 +38,9 @@ import {
   missingFieldsNotice,
   NOTES_FLAGS_INPUT,
   NOTES_OTHER_INPUT,
+  OTHER_INPUT_MAX,
+  otherInputId,
+  otherLabel,
   parseCustomId,
   resumeButton,
   type SurveyCustomId,
@@ -87,6 +98,29 @@ function notesModal(date: string, notes?: SurveyNotes): ModalBuilder {
       new ActionRowBuilder<TextInputBuilder>().addComponents(other),
       new ActionRowBuilder<TextInputBuilder>().addComponents(flags),
     );
+}
+
+/**
+ * "Which other?" — the one text box a select that offered `other` needs, since
+ * the menu can record that it was something else but not what. Opened from the
+ * select itself, so its submit keeps the message the select was on.
+ */
+function otherModal(date: string, field: FieldDef, notes: SurveyNotes): ModalBuilder {
+  const noteKey = otherNoteKey(field);
+  const input = new TextInputBuilder()
+    .setCustomId(otherInputId(field.key))
+    .setLabel("Which other?")
+    .setStyle(TextInputStyle.Short)
+    .setRequired(true)
+    .setMaxLength(OTHER_INPUT_MAX);
+  // Re-picking `other` reopens on what she already typed, so a correction is an
+  // edit of the words rather than a second answer.
+  const existing = noteKey ? notes[noteKey] : undefined;
+  if (existing) input.setValue(existing.slice(0, OTHER_INPUT_MAX));
+  return new ModalBuilder()
+    .setCustomId(customIds.otherModal(date, field.key))
+    .setTitle(noteKey ? otherLabel(noteKey) : "Other")
+    .addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(input));
 }
 
 /**
@@ -192,16 +226,56 @@ export async function handleInteraction(interaction: Interaction): Promise<void>
 }
 
 /**
+ * Stores a select answer that included `other`, then asks what it was.
+ *
+ * The modal is this click's acknowledgement — Discord accepts one response per
+ * interaction, and a deferred update plus a modal would be a second — so nothing
+ * is deferred here. The draft is written before the modal opens: the answer is
+ * then on disk if the process restarts while she is typing, and the modal's
+ * submit only has to add the words. A discarded modal therefore costs a
+ * sentence, never the answer.
+ */
+async function answerWithOther(
+  interaction: StringSelectMenuInteraction,
+  date: string,
+  field: FieldDef,
+): Promise<void> {
+  const draft = await draftFor(interaction.user.id, date);
+  try {
+    draft.answers = applyAnswer(draft.answers, field.key, interaction.values);
+  } catch {
+    await interaction.reply({
+      content: "That answer could not be read. Please pick it again.",
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+  draft.page = field.page;
+  await drafts.persist();
+  await interaction.showModal(otherModal(date, field, draft.notes));
+}
+
+/**
  * The acknowledgement rule: every component is acknowledged first, with
  * `deferUpdate` when the message itself will be edited and `deferReply` when the
  * answer is a new ephemeral message. The notes button is the exception —
  * `showModal` is its acknowledgement. Nothing slow (a file write, an API call
- * for someone else) happens before the ack.
+ * for someone else) happens before the ack, with one deliberate exception: a
+ * select answered with `other` writes its draft before it opens the modal, so a
+ * restart in the seconds while she types cannot lose the answer she gave.
  */
 export async function dispatch(interaction: Interaction, parsed: SurveyCustomId): Promise<void> {
   switch (parsed.kind) {
     case "field": {
       if (!interaction.isStringSelectMenu()) return;
+      const field = fieldByKey(parsed.field);
+      if (!field) return;
+      // A select that offers `other` answers with a modal instead of an update:
+      // Discord takes one response per interaction, so this path never defers.
+      if (interaction.values.includes(OTHER) && otherNoteKey(field)) {
+        await answerWithOther(interaction, parsed.date, field);
+        return;
+      }
       await interaction.deferUpdate();
       const draft = await draftFor(interaction.user.id, parsed.date);
       try {
@@ -213,9 +287,17 @@ export async function dispatch(interaction: Interaction, parsed: SurveyCustomId)
         });
         return;
       }
-      draft.page = fieldByKey(parsed.field)?.page ?? draft.page;
+      draft.page = field.page;
+      // No `other` in this answer, so words typed for a previous one describe
+      // something the answer no longer says.
+      const noteKey = otherNoteKey(field);
+      if (noteKey && draft.notes[noteKey]) {
+        draft.notes = { ...draft.notes, [noteKey]: "" };
+      }
       await drafts.persist();
-      await interaction.editReply(buildSurveyMessage(draft.date, draft.answers, draft.page));
+      await interaction.editReply(
+        buildSurveyMessage(draft.date, draft.answers, draft.page, draft.notes),
+      );
       return;
     }
 
@@ -225,7 +307,9 @@ export async function dispatch(interaction: Interaction, parsed: SurveyCustomId)
       const draft = await draftFor(interaction.user.id, parsed.date);
       draft.page = parsed.page;
       await drafts.persist();
-      await interaction.editReply(buildSurveyMessage(draft.date, draft.answers, parsed.page));
+      await interaction.editReply(
+        buildSurveyMessage(draft.date, draft.answers, parsed.page, draft.notes),
+      );
       return;
     }
 
@@ -248,14 +332,17 @@ export async function dispatch(interaction: Interaction, parsed: SurveyCustomId)
       const draft = await draftFor(interaction.user.id, parsed.date);
       draft.page = 1;
       await drafts.persist();
-      await interaction.editReply(buildSurveyMessage(draft.date, draft.answers, 1));
+      await interaction.editReply(buildSurveyMessage(draft.date, draft.answers, 1, draft.notes));
       return;
     }
 
     case "notes-modal": {
       if (!interaction.isModalSubmit()) return;
       const draft = drafts.ensure(interaction.user.id, parsed.date);
+      // Keep what the `other` modals stored: this modal replaces the two notes
+      // it owns, not the entry's whole notes object.
       draft.notes = {
+        ...draft.notes,
         other: interaction.fields.getTextInputValue(NOTES_OTHER_INPUT).trim(),
         red_flags_note: interaction.fields.getTextInputValue(NOTES_FLAGS_INPUT).trim(),
       };
@@ -269,6 +356,38 @@ export async function dispatch(interaction: Interaction, parsed: SurveyCustomId)
         components: [submitRow(parsed.date)],
         flags: MessageFlags.Ephemeral,
       });
+      return;
+    }
+
+    case "other-modal": {
+      if (!interaction.isModalSubmit()) return;
+      const field = fieldByKey(parsed.field);
+      const noteKey = field ? otherNoteKey(field) : undefined;
+      if (!field || !noteKey) return;
+      const draft = await draftFor(interaction.user.id, parsed.date);
+      const text = interaction.fields
+        .getTextInputValue(otherInputId(field.key))
+        .slice(0, OTHER_INPUT_MAX)
+        .trim();
+      // The words are a note, not an answer: `answers.medications` still says
+      // ["other"], which is the value the CSV's fixed column counts.
+      draft.notes = { ...draft.notes, [noteKey]: text };
+      draft.page = field.page;
+      await drafts.persist();
+      // A modal opened from a component keeps that component's message, and
+      // update() both acknowledges the submit and re-renders the prompt. One
+      // response, one edit: never a deferral and an edit as well.
+      if (!interaction.isFromMessage()) {
+        await interaction.reply({
+          content:
+            "Saved what you typed. This check-in message cannot be edited from a modal that did not come from it; the next click on it shows the answer.",
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
+      await interaction.update(
+        buildSurveyMessage(draft.date, draft.answers, draft.page, draft.notes),
+      );
       return;
     }
 
@@ -375,6 +494,8 @@ function confirmationCopy(
     `That is ${monthCount} ${monthCount === 1 ? "entry" : "entries"} in ${monthKey(entry.date)}.`,
     "**Edit tonight** changes an answer, and submitting again corrects this one line rather than adding a second. **Add notes** adds anything else.",
   ];
+  if (entry.notes.other_meds) lines.push(`${otherLabel("other_meds")}: ${entry.notes.other_meds}`);
+  if (entry.notes.other_foods) lines.push(`${otherLabel("other_foods")}: ${entry.notes.other_foods}`);
   const flags = redFlagMessage(entry.red_flags);
   if (flags) lines.push(flags);
   return lines.join("\n\n");

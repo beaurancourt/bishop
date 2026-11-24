@@ -117,6 +117,11 @@ LEGACY_FOOD_LISTS = {
     "carbonated": "foods_other",
 }
 
+# Mirrors src/survey/entry.ts: every key the notes object can hold. An entry only
+# writes other_meds/other_foods when she typed something, so the last two are
+# mentioned in the summary only when non-empty.
+NOTE_KEYS = ["other", "other_meds", "other_foods", "red_flags_note"]
+
 # Mirrors src/survey/redflags.ts: keys are stored, these are read by a person.
 RED_FLAG_LABELS = {
     "unintentional_weight_loss": "unintentional weight loss",
@@ -234,7 +239,7 @@ def write_csv(entries: list[dict], stream) -> None:
     writer = csv.writer(stream, lineterminator="\n")
     header = ["date", "user", "submitted_at"]
     header += [name for _, name in FIELD_COLUMNS]
-    header += ["notes_other", "notes_red_flags", "red_flags"]
+    header += ["notes_other", "notes_other_meds", "notes_other_foods", "notes_red_flags", "red_flags"]
     writer.writerow(header)
     for entry in entries:
         row = [entry.get("date", ""), entry.get("user", ""), entry.get("submitted_at", "")]
@@ -242,6 +247,8 @@ def write_csv(entries: list[dict], stream) -> None:
         notes = entry.get("notes") or {}
         row += [
             notes.get("other", ""),
+            notes.get("other_meds", ""),
+            notes.get("other_foods", ""),
             notes.get("red_flags_note", ""),
             "; ".join(flag_labels(entry)),
         ]
@@ -528,10 +535,13 @@ def write_markdown(entries: list[dict], month: date, stream) -> None:
         write("\nMedication days: " + ", ".join(f"{key} {count}" for key, count in sorted(medications.items())) + "\n")
 
     # --- notes --------------------------------------------------------------
+    # `other_meds` and `other_foods` are what a select answered `other` was; they
+    # are shown only when she typed something, unlike the two free-text notes
+    # that are always written.
     notes = [
         entry
         for entry in entries
-        if (entry.get("notes") or {}).get("other") or (entry.get("notes") or {}).get("red_flags_note")
+        if any((entry.get("notes") or {}).get(key) for key in NOTE_KEYS)
     ]
     write("\n## Notes\n\n")
     if not notes:
@@ -541,6 +551,10 @@ def write_markdown(entries: list[dict], month: date, stream) -> None:
         parts = []
         if note.get("other"):
             parts.append(f"other: {note['other']}")
+        if note.get("other_meds"):
+            parts.append(f"other medication: {note['other_meds']}")
+        if note.get("other_foods"):
+            parts.append(f"other food: {note['other_foods']}")
         if note.get("red_flags_note"):
             parts.append(f"red flags: {note['red_flags_note']}")
         write(f"- {entry.get('date', '?')} — " + " · ".join(parts) + "\n")

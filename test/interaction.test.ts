@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,7 +8,7 @@ import { MessageFlags, type Interaction } from "discord.js";
 import { drafts, dispatch, handleInteraction } from "../src/survey/index.js";
 import { draftsFile } from "../src/survey/drafts.js";
 import type { Answers } from "../src/survey/fields.js";
-import { NOTES_FLAGS_INPUT, NOTES_OTHER_INPUT } from "../src/survey/prompt.js";
+import { NOTES_FLAGS_INPUT, NOTES_OTHER_INPUT, OTHER_INPUT_MAX, otherInputId } from "../src/survey/prompt.js";
 import { monthFile } from "../src/survey/storage.js";
 
 const USER = "111111111111111111";
@@ -66,7 +66,10 @@ interface FakeOptions {
   modalFields?: Record<string, string>;
   /** How long ago Discord says the click happened. */
   ageMs?: number;
+  /** Whether the modal this submit belongs to came from a component. */
+  fromMessage?: boolean;
   onDeferUpdate?: () => void;
+  onShowModal?: () => void;
   rejectReply?: boolean;
 }
 
@@ -102,6 +105,9 @@ function fakeInteraction(options: FakeOptions): Fake {
     isButton: () => options.isButton ?? false,
     isStringSelectMenu: () => options.isSelect ?? false,
     isModalSubmit: () => options.isModal ?? false,
+    // A modal the survey opens always comes from a component (a select or a
+    // button), so its submit can edit that message back.
+    isFromMessage: () => options.fromMessage ?? options.isModal ?? false,
     get replied() {
       return state.replied;
     },
@@ -111,6 +117,7 @@ function fakeInteraction(options: FakeOptions): Fake {
     showModal: async (modal: { toJSON: () => unknown }) => {
       events.push("showModal");
       modals.push(modal);
+      options.onShowModal?.();
     },
     deferUpdate: async () => {
       events.push("deferUpdate");
@@ -470,4 +477,229 @@ test("a restart between Submit and the confirmation buttons does not break them"
   const again = fakeInteraction({ customId: `survey:${DATE}:submit`, isButton: true });
   await handleInteraction(again.interaction);
   assert.equal((await monthLines(dir)).length, 1, "the resubmit still replaces the line");
+});
+
+/** The one entry stored for the test's user and date, parsed. */
+interface StoredEntry {
+  answers: { medications: string[] };
+  notes: { other?: string; other_meds?: string; other_foods?: string };
+}
+
+async function storedEntry(dir: string): Promise<StoredEntry> {
+  const lines = await monthLines(dir);
+  assert.equal(lines.length, 1, "one evening is one line");
+  return JSON.parse(lines[0]) as StoredEntry;
+}
+
+test("other stores the answer first, then asks what it was, and keeps the words", async (t) => {
+  const dir = await workspace(t);
+  process.env.SURVEY_USER_IDS = USER;
+  const draft = drafts.ensure(USER, DATE, STARTED_AT);
+  draft.answers = fullAnswers();
+  await drafts.persist();
+
+  // The select click. The modal is its only response: no deferUpdate, and the
+  // answer is already in the draft file when the box opens.
+  let answerAtModal: unknown = null;
+  let onDiskAtModal: unknown = null;
+  const pick = fakeInteraction({
+    customId: `survey:${DATE}:field:medications`,
+    isSelect: true,
+    values: ["other"],
+    onShowModal: () => {
+      answerAtModal = drafts.get(USER, DATE)?.answers.medications;
+      onDiskAtModal = existsSync(draftsFile()) ? readFileSync(draftsFile(), "utf8") : null;
+    },
+  });
+  await handleInteraction(pick.interaction);
+
+  assert.deepEqual(pick.events, ["showModal"], "one response; nothing deferred as well");
+  assert.deepEqual(answerAtModal, ["other"], "the answer is stored before the modal opens");
+  const persisted = JSON.parse(String(onDiskAtModal)) as {
+    drafts: Record<string, { answers: { medications: string[] } }>;
+  };
+  assert.deepEqual(
+    Object.values(persisted.drafts)[0].answers.medications,
+    ["other"],
+    "the draft file already holds the answer",
+  );
+  assert.match(JSON.stringify(pick.modals[0]?.toJSON() ?? {}), /Which other\?/);
+
+  // The modal submit: one update of the prompt, which now names what she typed.
+  const modal = fakeInteraction({
+    customId: `survey:${DATE}:other-modal:medications`,
+    isModal: true,
+    modalFields: { [otherInputId("medications")]: "  ibuprofen  " },
+  });
+  await handleInteraction(modal.interaction);
+
+  assert.deepEqual(modal.events, ["update"], "the submit edits the prompt once; no deferral as well");
+  assert.equal(modal.edits.length, 1);
+  assert.match(String(modal.edits[0].content), /Other medication: ibuprofen/);
+  assert.match(String(modal.edits[0].content), /Page 4 of 5/, "the page she answered stays in view");
+  assert.equal(drafts.get(USER, DATE)?.notes.other_meds, "ibuprofen", "the words are trimmed");
+
+  const submit = fakeInteraction({ customId: `survey:${DATE}:submit`, isButton: true });
+  await handleInteraction(submit.interaction);
+
+  const entry = await storedEntry(dir);
+  assert.deepEqual(entry.answers.medications, ["other"], "the answer keeps the fixed value");
+  assert.equal(entry.notes.other_meds, "ibuprofen", "the words live in the notes");
+  assert.match(String(submit.edits.at(-1)?.content), /Other medication: ibuprofen/);
+});
+
+test("a modal she dismisses leaves the select answer and writes no note", async (t) => {
+  const dir = await workspace(t);
+  process.env.SURVEY_USER_IDS = USER;
+  const draft = drafts.ensure(USER, DATE, STARTED_AT);
+  draft.answers = fullAnswers();
+  await drafts.persist();
+
+  // Dismissing a modal sends Discord nothing, so the select's own click is the
+  // last event: everything it stored has to stand on its own.
+  const pick = fakeInteraction({
+    customId: `survey:${DATE}:field:medications`,
+    isSelect: true,
+    values: ["other"],
+  });
+  await handleInteraction(pick.interaction);
+  await drafts.reload();
+
+  assert.deepEqual(drafts.get(USER, DATE)?.answers.medications, ["other"]);
+  assert.equal(drafts.get(USER, DATE)?.notes.other_meds, undefined);
+
+  const submit = fakeInteraction({ customId: `survey:${DATE}:submit`, isButton: true });
+  await handleInteraction(submit.interaction);
+
+  const entry = await storedEntry(dir);
+  assert.deepEqual(entry.answers.medications, ["other"], "the answer survives the cancelled modal");
+  assert.equal(entry.notes.other_meds, undefined, "no words were typed, so no note is invented");
+});
+
+test("a restart between the select and the modal keeps the answer and takes the words", async (t) => {
+  const dir = await workspace(t);
+  process.env.SURVEY_USER_IDS = USER;
+  const draft = drafts.ensure(USER, DATE, STARTED_AT);
+  draft.answers = fullAnswers();
+  await drafts.persist();
+
+  const pick = fakeInteraction({
+    customId: `survey:${DATE}:field:medications`,
+    isSelect: true,
+    values: ["other"],
+  });
+  await handleInteraction(pick.interaction);
+
+  // The process restarts while the modal is open: memory is gone, the file is
+  // not, and the modal that is still open submits to the new process.
+  await drafts.reload();
+  assert.deepEqual(drafts.get(USER, DATE)?.answers.medications, ["other"]);
+
+  const modal = fakeInteraction({
+    customId: `survey:${DATE}:other-modal:medications`,
+    isModal: true,
+    modalFields: { [otherInputId("medications")]: "codeine" },
+  });
+  await handleInteraction(modal.interaction);
+
+  assert.deepEqual(modal.events, ["update"]);
+  assert.equal(drafts.get(USER, DATE)?.notes.other_meds, "codeine");
+  assert.match(String(modal.edits[0].content), /Other medication: codeine/);
+
+  const submit = fakeInteraction({ customId: `survey:${DATE}:submit`, isButton: true });
+  await handleInteraction(submit.interaction);
+
+  const entry = await storedEntry(dir);
+  assert.deepEqual(entry.answers.medications, ["other"]);
+  assert.equal(entry.notes.other_meds, "codeine", "an answer given before the restart is still one entry");
+});
+
+test("the other text is capped, and a later answer without other clears it", async (t) => {
+  const dir = await workspace(t);
+  process.env.SURVEY_USER_IDS = USER;
+  const draft = drafts.ensure(USER, DATE, STARTED_AT);
+  draft.answers = fullAnswers();
+  await drafts.persist();
+
+  // "other" beside a named medication still asks, once.
+  const pick = fakeInteraction({
+    customId: `survey:${DATE}:field:medications`,
+    isSelect: true,
+    values: ["PPI", "other"],
+  });
+  await handleInteraction(pick.interaction);
+  assert.deepEqual(pick.events, ["showModal"]);
+
+  const modal = fakeInteraction({
+    customId: `survey:${DATE}:other-modal:medications`,
+    isModal: true,
+    modalFields: { [otherInputId("medications")]: "x".repeat(500) },
+  });
+  await handleInteraction(modal.interaction);
+  assert.equal(
+    drafts.get(USER, DATE)?.notes.other_meds?.length,
+    OTHER_INPUT_MAX,
+    "a paste longer than the input is cut to what Discord accepts",
+  );
+
+  // She changes her mind and keeps only the named medication.
+  const change = fakeInteraction({
+    customId: `survey:${DATE}:field:medications`,
+    isSelect: true,
+    values: ["PPI"],
+  });
+  await handleInteraction(change.interaction);
+  assert.equal(drafts.get(USER, DATE)?.notes.other_meds, "", "the abandoned words go with the answer");
+
+  const submit = fakeInteraction({ customId: `survey:${DATE}:submit`, isButton: true });
+  await handleInteraction(submit.interaction);
+  const entry = await storedEntry(dir);
+  assert.deepEqual(entry.answers.medications, ["PPI"]);
+  assert.equal(entry.notes.other_meds, undefined, "no stale note reaches the file");
+});
+
+test("Add notes keeps the words the other modal stored", async (t) => {
+  const dir = await workspace(t);
+  process.env.SURVEY_USER_IDS = USER;
+  const draft = drafts.ensure(USER, DATE, STARTED_AT);
+  draft.answers = fullAnswers();
+  draft.notes = { ...draft.notes, other_meds: "ibuprofen" };
+  await drafts.persist();
+
+  const addNotes = fakeInteraction({ customId: `survey:${DATE}:notes`, isButton: true });
+  await handleInteraction(addNotes.interaction);
+  const modal = fakeInteraction({
+    customId: `survey:${DATE}:notes-modal`,
+    isModal: true,
+    modalFields: { [NOTES_OTHER_INPUT]: "tea after dinner" },
+  });
+  await handleInteraction(modal.interaction);
+  assert.equal(drafts.get(USER, DATE)?.notes.other_meds, "ibuprofen", "the notes modal owns two boxes, not all of them");
+
+  const submit = fakeInteraction({ customId: `survey:${DATE}:submit`, isButton: true });
+  await handleInteraction(submit.interaction);
+  const entry = await storedEntry(dir);
+  assert.equal(entry.notes.other, "tea after dinner");
+  assert.equal(entry.notes.other_meds, "ibuprofen");
+});
+
+test("a modal that did not come from a component answers ephemerally", async (t) => {
+  await workspace(t);
+  process.env.SURVEY_USER_IDS = USER;
+  const draft = drafts.ensure(USER, DATE, STARTED_AT);
+  draft.answers = fullAnswers();
+  draft.answers.medications = ["other"];
+  await drafts.persist();
+
+  const modal = fakeInteraction({
+    customId: `survey:${DATE}:other-modal:medications`,
+    isModal: true,
+    fromMessage: false,
+    modalFields: { [otherInputId("medications")]: "ibuprofen" },
+  });
+  await handleInteraction(modal.interaction);
+
+  assert.deepEqual(modal.events, ["reply"], "no message to edit, so a reply says it was saved");
+  assert.equal(modal.replies[0].flags, MessageFlags.Ephemeral);
+  assert.equal(drafts.get(USER, DATE)?.notes.other_meds, "ibuprofen", "the words are stored either way");
 });

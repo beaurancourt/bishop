@@ -116,6 +116,8 @@ skipUnlessPython("the CSV has one column per field plus notes and flags", async 
     "pain_location",
     "other_symptoms",
     "notes_other",
+    "notes_other_meds",
+    "notes_other_foods",
     "notes_red_flags",
     "red_flags",
   ].join(","));
@@ -377,4 +379,53 @@ skipUnlessPython("a month with no file is an error, not an empty summary", async
       return true;
     },
   );
+});
+
+skipUnlessPython("the words behind other are their own columns, and only when non-empty", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "bishop-export-other-"));
+  t.after(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+  // The first day answered medication with `other` and typed what it was; the
+  // second day answered it normally, so nothing is invented for it.
+  const typed = entry("2026-11-01", { medications: ["other"] }, {
+    notes: { other: "", other_meds: "ibuprofen, codeine", red_flags_note: "" },
+  });
+  const plain = entry("2026-11-02", { medications: ["PPI"] });
+  await writeFile(
+    join(dir, "2026-11.jsonl"),
+    [typed, plain].map((item) => JSON.stringify(item)).join("\n") + "\n",
+    "utf8",
+  );
+
+  const csv = await run("python3", [
+    SCRIPT,
+    "--month",
+    "2026-11",
+    "--format",
+    "csv",
+    "--data-dir",
+    dir,
+  ]);
+  const [header, ...body] = csv.stdout.trim().split("\n");
+  const columns = header.split(",");
+  assert.ok(columns.includes("notes_other_meds"));
+  assert.ok(columns.includes("notes_other_foods"));
+  assert.match(body[0], /"ibuprofen, codeine"/, "a comma in the words is quoted, like any note");
+  // The answer column keeps the fixed value the export counts.
+  assert.match(body[0], /,other,/, "medications still exports as other");
+  assert.equal(body[1].split(",")[columns.indexOf("notes_other_meds")], "");
+
+  const md = await run("python3", [
+    SCRIPT,
+    "--month",
+    "2026-11",
+    "--format",
+    "md",
+    "--data-dir",
+    dir,
+  ]);
+  assert.match(md.stdout, /2026-11-01 — other medication: ibuprofen, codeine/);
+  assert.doesNotMatch(md.stdout, /other food/, "a food note is only mentioned when there is one");
+  assert.doesNotMatch(md.stdout, /2026-11-02 — /, "a day with no notes keeps no notes line");
 });

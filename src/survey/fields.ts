@@ -15,6 +15,12 @@
 /** Multi-select sentinel: "none" means the list is empty for that day. */
 export const NONE = "none";
 
+/**
+ * The answer value that means "none of these": the select cannot name it, so a
+ * modal asks and the words are kept in the entry's notes, never in the answer.
+ */
+export const OTHER = "other";
+
 export type FieldKey =
   | "worst_pain"
   | "bloating"
@@ -371,6 +377,34 @@ export function fieldByKey(key: string): FieldDef | undefined {
 
 export function fieldsOnPage(page: number): FieldDef[] {
   return FIELDS.filter((field) => field.page === page);
+}
+
+/** The notes key that holds the free text an `other` answer asked for. */
+export type OtherNoteKey = "other_meds" | "other_foods";
+
+/**
+ * Which select's `other` answer lands in which note.
+ *
+ * The words are not a fixed answer value: `medications` stays `["other"]`, and
+ * what it was goes in `notes.other_meds`, so the CSV's fixed columns and the
+ * export's counts by value keep their meaning. The two food lists share one
+ * note because only "other foods of note" offers `other` today; if both do, they
+ * need a key each, or the second answer overwrites the first.
+ */
+export const OTHER_NOTE_KEYS: Partial<Record<FieldKey, OtherNoteKey>> = {
+  medications: "other_meds",
+  foods_fodmap: "other_foods",
+  foods_other: "other_foods",
+};
+
+/**
+ * The notes key for a field's `other` answer, or undefined when the select does
+ * not offer `other` (or has no place to put the words). Undefined is what makes
+ * the select behave as it always has: pick, store, update.
+ */
+export function otherNoteKey(field: FieldDef): OtherNoteKey | undefined {
+  if (!field.options.some((option) => option.value === OTHER)) return undefined;
+  return OTHER_NOTE_KEYS[field.key];
 }
 
 export class AnswerError extends Error {}
